@@ -18,7 +18,7 @@ import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
 const POLL_MS = 3000;
-const DEMO_STEP_MS = 2000; // jeda tiap tahap saat demo auto-complete
+const DEMO_STEP_MS = 4000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
