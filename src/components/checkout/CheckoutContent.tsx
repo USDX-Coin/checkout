@@ -1,0 +1,249 @@
+"use client";
+
+// Checkout own-hosted refresh-safe (USDX-224, port USDX-202; SOT week2.md § Halaman
+// Checkout #3). Render dari GET /v2/mint/{id}: countdown, order/pelanggan/wallet, pilih
+// metode (REQUESTED) → POST /pay → instruksi bayar inline + status tracker. Terkunci
+// setelah pilih metode; state expired (client-side) & FAILED ditangani. Standalone (tanpa
+// chrome dashboard `app`): "Batal"/"Kembali" pakai router.back() — dynamic, tanpa hardcode
+// domain app (user selalu tiba via redirect dari app, jadi back = kembali ke /mint).
+
+import { useParams, useRouter } from "next/navigation";
+import { Copy, Loader2, QrCode } from "lucide-react";
+import { toast } from "sonner";
+import { useCheckout } from "@/hooks/useCheckout";
+import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
+import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
+import { BANK_BRAND, QRIS_RED, VA_BANKS } from "@/lib/constants";
+import { formatIDR, formatCountdown, truncateAddress } from "@/lib/utils";
+import type { MintChannelOption, MintOrderDetail, VaBank } from "@/types";
+
+// GET bisa tak menyertakan channels[] (backend lama) — fallback ke daftar statis dengan
+// pgFee tak diketahui supaya pemilih tetap render saat refresh.
+function resolveChannels(order: MintOrderDetail): MintChannelOption[] {
+  if (order.channels && order.channels.length) return order.channels;
+  return [
+    { channel: "VA", pgFeeIdr: "", banks: [...VA_BANKS] as VaBank[] },
+    { channel: "QRIS", pgFeeIdr: "", banks: null },
+  ];
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-5">
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1.5 font-medium text-foreground">{children}</span>
+    </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-[42px] items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+    >
+      Kembali
+    </button>
+  );
+}
+
+function PaymentInstructions({
+  order,
+  onCopy,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+}) {
+  const bankBrand = order.paymentBank ? BANK_BRAND[order.paymentBank] : null;
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-medium text-foreground">Instruksi pembayaran</p>
+      {order.paymentChannel === "VA" ? (
+        <>
+          {order.paymentBank && bankBrand && (
+            <Row label="Virtual Account">
+              {bankBrand.logo ? (
+                <span className="flex h-6 items-center justify-center rounded bg-white px-1.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={bankBrand.logo}
+                    alt={order.paymentBank}
+                    className="max-h-4 w-auto object-contain"
+                  />
+                </span>
+              ) : (
+                <span
+                  className="flex h-6 w-9 items-center justify-center rounded text-[10px] font-extrabold tracking-tight"
+                  style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
+                >
+                  {bankBrand.mark}
+                </span>
+              )}
+              {order.paymentBank}
+            </Row>
+          )}
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
+            <span className="font-mono text-base font-semibold text-foreground">
+              {order.virtualAccountNo}
+            </span>
+            <button
+              type="button"
+              onClick={() => order.virtualAccountNo && onCopy(order.virtualAccountNo)}
+              aria-label="Salin"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Copy className="size-4" />
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center">
+          <div className="flex items-center gap-2">
+            <span
+              className="flex size-7 items-center justify-center rounded-md"
+              style={{ backgroundColor: QRIS_RED }}
+            >
+              <QrCode className="size-4 text-white" />
+            </span>
+            <span className="text-sm font-extrabold tracking-tight text-foreground">QRIS</span>
+          </div>
+          <div className="grid size-44 place-items-center rounded-lg border border-border bg-white p-3">
+            <QrCode className="size-full text-[#0f172a]" strokeWidth={1} />
+          </div>
+          <span className="text-xs text-muted-foreground">
+            Scan QR ini di aplikasi bank / e-wallet kamu.
+          </span>
+          <div className="flex w-full items-center justify-between gap-2 rounded-lg bg-muted p-2.5">
+            <span className="truncate font-mono text-xs text-foreground">{order.paymentUrl}</span>
+            <button
+              type="button"
+              onClick={() => order.paymentUrl && onCopy(order.paymentUrl)}
+              aria-label="Salin"
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Copy className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CheckoutContent() {
+  const router = useRouter();
+  const params = useParams<{ orderId: string }>();
+  const id = params.orderId;
+  const { order, isLoading, isError, pay, isPaying, payError, secondsLeft, isExpired } =
+    useCheckout(id);
+
+  function copy(text: string) {
+    navigator.clipboard?.writeText(text);
+    toast.success("Disalin");
+  }
+
+  const showCountdown =
+    Boolean(order) && !isExpired && order!.status !== "COMPLETED" && order!.status !== "FAILED";
+
+  return (
+    <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col gap-4 px-4 py-8">
+      {isLoading ? (
+        <Card>
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+            <Loader2 className="size-5 animate-spin" /> Memuat pesanan…
+          </div>
+        </Card>
+      ) : isError || !order ? (
+        <Card>
+          <div className="flex flex-col items-center gap-4 py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              Pesanan tidak ditemukan atau sesi tidak valid.
+            </p>
+            <BackButton onClick={() => router.back()} />
+          </div>
+        </Card>
+      ) : (
+        <>
+          {showCountdown && (
+            <div className="rounded-lg bg-primary/5 px-4 py-2.5 text-center text-sm text-foreground">
+              Pembayaran berakhir dalam{" "}
+              <span className="font-semibold tabular-nums">{formatCountdown(secondsLeft)}</span>
+            </div>
+          )}
+
+          <Card>
+            <div className="flex flex-col gap-1">
+              <h2 className="text-base font-medium text-foreground">Minting USDX</h2>
+              <p className="text-xs text-muted-foreground">Pesanan #{order.orderNumber}</p>
+            </div>
+
+            <Row label="Total Pembayaran">{formatIDR(Number(order.totalBeforePgFeeIdr))}</Row>
+            <div className="border-t border-border" />
+            <Row label="Nama Lengkap">{order.customerName}</Row>
+            <Row label="Wallet Tujuan">
+              <span className="font-mono text-xs">
+                {order.chain} · {truncateAddress(order.userAddress)}
+              </span>
+              <button
+                type="button"
+                onClick={() => copy(order.userAddress)}
+                aria-label="Salin"
+                className="text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </Row>
+
+            <div className="border-t border-border" />
+
+            {isExpired ? (
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <p className="text-sm font-medium text-destructive">Pesanan kedaluwarsa.</p>
+                <BackButton onClick={() => router.back()} />
+              </div>
+            ) : order.paymentStatus === "REQUESTED" ? (
+              <PaymentMethodSelector
+                channels={resolveChannels(order)}
+                totalBeforePgFeeIdr={order.totalBeforePgFeeIdr}
+                isPaying={isPaying}
+                payError={payError}
+                onPay={(channel, bank) => {
+                  pay(channel, bank).catch(() => {});
+                }}
+                onCancel={() => router.back()}
+              />
+            ) : (
+              <div className="flex flex-col gap-4">
+                <PaymentInstructions order={order} onCopy={copy} />
+                {order.totalPayIdr && (
+                  <div className="flex items-center justify-between border-t border-border pt-3 text-sm">
+                    <span className="font-medium text-foreground">Total bayar</span>
+                    <span className="font-semibold text-foreground">
+                      {formatIDR(Number(order.totalPayIdr))}
+                    </span>
+                  </div>
+                )}
+                <div className="border-t border-border" />
+                <MintStatusTracker order={order} />
+              </div>
+            )}
+
+            <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+              Mode simulasi: pembayaran tidak diproses ke bank sungguhan; status pesanan
+              diselesaikan otomatis oleh sistem (mock payment provider).
+            </p>
+          </Card>
+        </>
+      )}
+    </main>
+  );
+}
