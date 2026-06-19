@@ -4,8 +4,8 @@
 // Checkout #3). Render dari GET /v2/mint/{id}: countdown, order/pelanggan/wallet, pilih
 // metode (REQUESTED) → POST /pay → instruksi bayar inline + status tracker. Terkunci
 // setelah pilih metode; state expired (client-side) & FAILED ditangani. Standalone (tanpa
-// chrome dashboard `app`): "Batal"/"Kembali" pakai router.back() (user tiba via redirect
-// dari app); "Lihat Riwayat" hanya muncul bila NEXT_PUBLIC_APP_URL di-set.
+// chrome dashboard `app`): "Batal"/"Kembali" pakai router.back() — dynamic, tanpa hardcode
+// domain app (user selalu tiba via redirect dari app, jadi back = kembali ke /mint).
 
 import { useParams, useRouter } from "next/navigation";
 import { Copy, Loader2, QrCode } from "lucide-react";
@@ -14,7 +14,6 @@ import { useCheckout } from "@/hooks/useCheckout";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { BANK_BRAND, QRIS_RED, VA_BANKS } from "@/lib/constants";
-import { env } from "@/lib/env";
 import { formatIDR, formatCountdown, truncateAddress } from "@/lib/utils";
 import type { MintChannelOption, MintOrderDetail, VaBank } from "@/types";
 
@@ -235,14 +234,6 @@ export function CheckoutContent() {
                 )}
                 <div className="border-t border-border" />
                 <MintStatusTracker order={order} />
-                {order.status === "COMPLETED" && env.appUrl && (
-                  <a
-                    href={`${env.appUrl}/history`}
-                    className="flex h-[42px] items-center justify-center rounded-lg border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                  >
-                    Lihat Riwayat
-                  </a>
-                )}
               </div>
             )}
 
