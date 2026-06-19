@@ -30,3 +30,6 @@ yarn-error.log*
 
 # netlify
 .netlify
+
+# SOT (read-only clone, auto-synced via .claude SessionStart hook — jangan commit)
+sot/
