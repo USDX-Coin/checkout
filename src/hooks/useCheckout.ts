@@ -4,14 +4,21 @@
 // + status tracker, jalankan mutation POST /v2/mint/{id}/pay, dan turunkan countdown.
 // Polling berhenti saat order terminal (COMPLETED/FAILED) atau countdown habis (job
 // Expiry BE belum live, jadi FE menganggap `expiresAt` lampau = expired secara klien).
+//
+// DEMO mode (env.demoAutocomplete, dev/preview only): pipeline on-chain real
+// (Auto-Propose → Safe → COMPLETED) belum jalan di dev, jadi setelah bayar status tracker
+// DISIMULASIKAN maju PAID → COMPLETED tiap 2 detik. Override TAMPILAN saja (order di
+// backend tak berubah); OFF di prod.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { isApiError, isValidationError } from "@/lib/api/errors";
-import type { PaymentChannel, VaBank } from "@/types";
+import { env } from "@/lib/env";
+import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
 const POLL_MS = 3000;
+const DEMO_STEP_MS = 2000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
@@ -45,7 +52,30 @@ export function useCheckout(id: string) {
     },
   });
 
-  const order = query.data ?? null;
+  const fetched = query.data ?? null;
+
+  // ── DEMO auto-complete (env-gated, dev/preview) ────────────────────────────
+  // Begitu order ter-bayar (paymentStatus != REQUESTED): fase 1 (2s) → PAID
+  // (Pembayaran ✓, Proses on-chain aktif), fase 2 (4s) → COMPLETED (Selesai ✓).
+  const [demoPhase, setDemoPhase] = useState<0 | 1 | 2>(0);
+  const paidish = fetched !== null && fetched.paymentStatus !== "REQUESTED";
+  useEffect(() => {
+    if (!env.demoAutocomplete || !paidish || demoPhase !== 0) return;
+    const t1 = setTimeout(() => setDemoPhase(1), DEMO_STEP_MS);
+    const t2 = setTimeout(() => setDemoPhase(2), DEMO_STEP_MS * 2);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [paidish, demoPhase]);
+
+  const order = useMemo<MintOrderDetail | null>(() => {
+    if (!fetched || !env.demoAutocomplete || demoPhase === 0) return fetched;
+    if (demoPhase === 1) {
+      return { ...fetched, paymentStatus: "PAID", status: "WAITING_FOR_APPROVAL" };
+    }
+    return { ...fetched, paymentStatus: "PAID", safeStatus: "EXECUTED", status: "COMPLETED" };
+  }, [fetched, demoPhase]);
 
   // Tick 1 detik menggerakkan tampilan countdown.
   const [now, setNow] = useState(() => Date.now());

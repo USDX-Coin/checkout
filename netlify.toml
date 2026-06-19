@@ -22,7 +22,11 @@
 # cross-subdomain `.usdx.co.id` (USDX-222) — cookie HANYA di-set & dikirim ke host *.usdx.co.id.
 # Kalau base URL = railway.app (beda site), cookie tak akan ikut → GET /v2/mint/{id} 401.
 # dev/preview → https://api-dev.usdx.co.id ; staging/prod → https://api.usdx.co.id (Netlify UI).
+# NEXT_PUBLIC_DEMO_AUTOCOMPLETE: status tracker disimulasikan maju ke "Selesai" setelah
+# bayar (pipeline on-chain real belum jalan di dev). DEV/PREVIEW ONLY — JANGAN set di prod.
 [context.deploy-preview.environment]
   NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
+  NEXT_PUBLIC_DEMO_AUTOCOMPLETE = "true"
 [context.branch-deploy.environment]
   NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
+  NEXT_PUBLIC_DEMO_AUTOCOMPLETE = "true"
