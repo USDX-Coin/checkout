@@ -59,15 +59,18 @@ export function useCheckout(id: string) {
   // (Pembayaran ✓, Proses on-chain aktif), fase 2 (4s) → COMPLETED (Selesai ✓).
   const [demoPhase, setDemoPhase] = useState<0 | 1 | 2>(0);
   const paidish = fetched !== null && fetched.paymentStatus !== "REQUESTED";
+  // Deps HANYA [paidish] (BUKAN demoPhase): polling refetch tiap 3s bikin re-render, dan
+  // kalau demoPhase masuk deps, cleanup-nya keburu clear timer fase 2 → mentok di "Proses
+  // on-chain", nggak pernah "Selesai". paidish stabil `true` setelah bayar → timer aman.
   useEffect(() => {
-    if (!env.demoAutocomplete || !paidish || demoPhase !== 0) return;
+    if (!env.demoAutocomplete || !paidish) return;
     const t1 = setTimeout(() => setDemoPhase(1), DEMO_STEP_MS);
     const t2 = setTimeout(() => setDemoPhase(2), DEMO_STEP_MS * 2);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [paidish, demoPhase]);
+  }, [paidish]);
 
   const order = useMemo<MintOrderDetail | null>(() => {
     if (!fetched || !env.demoAutocomplete || demoPhase === 0) return fetched;
