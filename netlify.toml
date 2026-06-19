@@ -18,8 +18,11 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
 
 # Env per context — isi nilai final di Netlify UI (Site settings → Environment variables).
-# dev/preview → backend dev; staging/prod → idealnya https://api.usdx.co.id (lihat USDX-222).
+# WAJIB host di bawah *.usdx.co.id (BUKAN railway.app langsung): checkout auth pakai cookie
+# cross-subdomain `.usdx.co.id` (USDX-222) — cookie HANYA di-set & dikirim ke host *.usdx.co.id.
+# Kalau base URL = railway.app (beda site), cookie tak akan ikut → GET /v2/mint/{id} 401.
+# dev/preview → https://api-dev.usdx.co.id ; staging/prod → https://api.usdx.co.id (Netlify UI).
 [context.deploy-preview.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://usdx-backend-development.up.railway.app"
+  NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
 [context.branch-deploy.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://usdx-backend-development.up.railway.app"
+  NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
