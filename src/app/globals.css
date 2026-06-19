@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+/* Dark mode driven by a `.dark` class on <html> (next-themes attribute="class") */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Brand: maroon (#800000 → #ac0004) + gold accent (#f7a100), per Figma.
+ * Token disamakan dengan repo `app` agar checkout konsisten secara visual.
+ * Brand hues stay constant across themes; neutrals flip between light & dark.
+ */
+:root {
+  --background: #f2f2f2;
+  --foreground: #1a1a1a;
+
+  --card: #ffffff;
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+
+  --muted: #f0f0f0;
+  --muted-foreground: #777777;
+  --accent: #f0f0f0;
+  --accent-foreground: #1a1a1a;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #1a1a1a;
+
+  --border: #dddddd;
+  --input: #e5e5e5;
+  --ring: #800000;
+
+  --primary: #800000;
+  --primary-foreground: #ffffff;
+  --brand-from: #800000;
+  --brand-to: #ac0004;
+  --brand-dark: #141414;
+
+  --gold: #f7a100;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  --warning: #d97706;
+
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+
+  --card: #1a1a1a;
+  --card-foreground: #fafafa;
+  --popover: #1a1a1a;
+  --popover-foreground: #fafafa;
+
+  --muted: #202020;
+  --muted-foreground: #9a9a9a;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --secondary: #202020;
+  --secondary-foreground: #fafafa;
+
+  --border: #2c2c2c;
+  --input: #2c2c2c;
+  --ring: #ac0004;
+
+  --primary: #800000;
+  --primary-foreground: #ffffff;
+  --brand-from: #800000;
+  --brand-to: #ac0004;
+  --brand-dark: #141414;
+
+  --gold: #f7a100;
+
+  --destructive: #f87171;
+  --destructive-foreground: #1a1a1a;
+  --success: #22c55e;
+  --warning: #f59e0b;
+
+  color-scheme: dark;
+}
+
+/* Map flipping CSS vars onto Tailwind color utilities (theme-aware) */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-gold: var(--gold);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+/* Static brand ramp (maroon). 600–700 = the on-brand interactive shades. */
+@theme {
+  --color-primary-50: #fcf3f3;
+  --color-primary-100: #fae3e3;
+  --color-primary-200: #f3c4c4;
+  --color-primary-300: #e89a9a;
+  --color-primary-400: #d65f5f;
+  --color-primary-500: #bd2b2b;
+  --color-primary-600: #a30808;
+  --color-primary-700: #800000;
+  --color-primary-800: #6a0303;
+  --color-primary-900: #560808;
+  --color-primary-950: #2f0000;
+
+  --color-gold-400: #ffb733;
+  --color-gold-500: #f7a100;
+  --color-gold-600: #c47e00;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
+}
