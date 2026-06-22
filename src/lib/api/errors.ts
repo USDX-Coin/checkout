@@ -13,3 +13,16 @@ export function isApiError(error: unknown): error is ApiError {
 export function isValidationError(error: unknown): boolean {
   return isApiError(error) && error.code === "VALIDATION_ERROR";
 }
+
+// 429 RATE_LIMITED — throughput throttle mint (5 req/detik per user; conventions.md
+// § Rate Limiting). Transient, BUKAN error sesi — backoff + toast, jangan retry
+// agresif, jangan logout. (USDX-252)
+export function isRateLimited(error: unknown): boolean {
+  return isApiError(error) && error.status === 429 && error.code === "RATE_LIMITED";
+}
+
+// Detik tunggu dari header Retry-After saat 429 (0 kalau 429 tanpa info, null kalau bukan 429).
+export function getRateLimitSeconds(error: unknown): number | null {
+  if (isApiError(error) && error.status === 429) return error.retryAfterSeconds ?? 0;
+  return null;
+}
