@@ -108,6 +108,21 @@ describe("apiFetch (checkout — bearer JWT, USDX-239)", () => {
       expect(err.status).toBe(401);
     });
 
+    test("parses Retry-After into retryAfterSeconds on 429 RATE_LIMITED (USDX-252)", async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(
+          429,
+          { status: "error", error: { code: "RATE_LIMITED", message: "Terlalu banyak request" } },
+          { "Retry-After": "3" },
+        ),
+      );
+      const err = (await apiFetch("/api/v2/mint/ord_1").catch((e) => e)) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(429);
+      expect(err.code).toBe("RATE_LIMITED");
+      expect(err.retryAfterSeconds).toBe(3);
+    });
+
     test("falls back to UNKNOWN when the error body is not parseable", async () => {
       fetchMock.mockResolvedValue({
         ok: false,
