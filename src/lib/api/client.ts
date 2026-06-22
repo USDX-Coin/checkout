@@ -1,9 +1,10 @@
 // Pembungkus fetch tipis untuk backend USDX (USDX-224, port dari app USDX-150).
-// Beda dengan repo `app`: auth via **cross-subdomain cookie** (`.usdx.co.id`, USDX-222),
-// jadi pakai `credentials: "include"` — BUKAN Authorization: Bearer. Checkout tidak
-// punya UI login; sesi datang dari cookie yang di-set saat login consumer di `app`.
-// Kalau cookie tak ada (mis. localhost / sesi habis) → 401, dan halaman menampilkan
-// state "tidak ditemukan".
+// Auth = **bearer JWT** yang di-handoff dari `app` lewat URL hash (USDX-239,
+// supersede cross-subdomain cookie): tiap request bawa `Authorization: Bearer
+// <token>` dari `sessionStorage` (lihat `@/lib/auth/token`) — BUKAN cookie /
+// `credentials:"include"`. Checkout tidak punya UI login; token datang dari
+// redirect `app`. Kalau token tak ada / kedaluwarsa → 401 → halaman redirect balik
+// ke `app` (lihat `useCheckout`).
 //
 // - Prepend `env.apiBaseUrl` agar request kena backend, bukan origin FE.
 // - Unwrap envelope SoT `{ status, metadata, data }` → kembalikan `data`.
@@ -11,6 +12,7 @@
 //   (429 RATE_LIMITED throttle mint, conventions.md § Rate Limiting — USDX-252).
 
 import { env } from "@/lib/env";
+import { getToken } from "@/lib/auth/token";
 
 export class ApiError extends Error {
   status: number;
@@ -90,12 +92,15 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   if (body !== undefined && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json");
   }
+  // Bearer JWT dari sessionStorage (handoff `#token=` dari app, USDX-239).
+  const token = getToken();
+  if (token && !finalHeaders.has("Authorization")) {
+    finalHeaders.set("Authorization", `Bearer ${token}`);
+  }
 
   const response = await fetch(`${env.apiBaseUrl}${path}`, {
     ...rest,
     headers: finalHeaders,
-    // Bawa cookie sesi `.usdx.co.id` ke backend lintas-subdomain (USDX-222).
-    credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
