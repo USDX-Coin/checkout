@@ -13,19 +13,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
-import { isApiError, isValidationError } from "@/lib/api/errors";
+import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
 import { captureTokenFromHash } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
 import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
-const POLL_MS = 3000;
+const POLL_MS = 3000; // jauh di bawah throttle 5 req/detik (conventions.md § Rate Limiting)
 const DEMO_STEP_MS = 4000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
 function payErrorMessage(error: unknown): string | null {
   if (!error) return null;
+  // 429 RATE_LIMITED → toast throttle global (Providers, USDX-252); jangan
+  // tampilkan error inline (akan kebaca sebagai kegagalan generic).
+  if (isRateLimited(error)) return null;
   if (isApiError(error)) {
     if (error.code === "INVALID_ORDER_STATE")
       return "Pesanan tidak lagi bisa memilih metode. Tunggu kedaluwarsa, lalu mulai ulang dari /mint.";
@@ -57,9 +60,14 @@ export function useCheckout(id: string) {
       if (!o || TERMINAL.has(o.status)) return false;
       if (new Date(o.expiresAt).getTime() <= Date.now()) return false; // expired → stop
       // Poll selama menunggu konfirmasi pembayaran / settlement on-chain.
-      return o.paymentStatus === "WAITING_FOR_PAYMENT" || o.status === "WAITING_FOR_APPROVAL"
-        ? POLL_MS
-        : false;
+      const polling = o.paymentStatus === "WAITING_FOR_PAYMENT" || o.status === "WAITING_FOR_APPROVAL";
+      if (!polling) return false;
+      // Mundur ke Retry-After saat 429 RATE_LIMITED (≥1s) — jangan hammer throttle
+      // (USDX-252). `retry: false` di bawah sudah cegah retry-storm per tick.
+      if (isRateLimited(q.state.error)) {
+        return Math.max(1, getRateLimitSeconds(q.state.error) ?? 1) * 1000;
+      }
+      return POLL_MS;
     },
   });
 
