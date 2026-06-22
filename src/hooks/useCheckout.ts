@@ -14,6 +14,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { isApiError, isValidationError } from "@/lib/api/errors";
+import { captureTokenFromHash } from "@/lib/auth/token";
+import { redirectToApp } from "@/lib/auth/redirect";
 import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
@@ -36,6 +38,15 @@ function payErrorMessage(error: unknown): string | null {
 export function useCheckout(id: string) {
   const queryClient = useQueryClient();
 
+  // Capture token handoff dari URL hash SEBELUM fetch pertama (anti-race, ref USDX-58).
+  // useState lazy-init jalan sekali saat render pertama (sebelum effect & sebelum queryFn
+  // React Query), jadi `getToken()` sudah terisi ketika GET pertama jalan. Idempoten +
+  // SSR-safe (lihat token.ts).
+  useState(() => {
+    captureTokenFromHash();
+    return true;
+  });
+
   const query = useQuery({
     queryKey: ["mint-order", id],
     queryFn: () => getMintOrder(id),
@@ -53,6 +64,14 @@ export function useCheckout(id: string) {
   });
 
   const fetched = query.data ?? null;
+
+  // 401 (token absen / kedaluwarsa) → balik ke `app` untuk re-auth (USDX-239). Kalau
+  // `appUrl` tak di-set (mis. localhost) → redirectToApp() no-op, UI tampilkan state
+  // error + tombol Kembali.
+  const isUnauthorized = isApiError(query.error) && query.error.status === 401;
+  useEffect(() => {
+    if (isUnauthorized) redirectToApp();
+  }, [isUnauthorized]);
 
   // ── DEMO auto-complete (env-gated, dev/preview) ────────────────────────────
   // Begitu order ter-bayar (paymentStatus != REQUESTED): fase 1 (2s) → PAID
@@ -104,6 +123,7 @@ export function useCheckout(id: string) {
     order,
     isLoading: query.isLoading,
     isError: query.isError,
+    isUnauthorized,
     pay: (channel: PaymentChannel, bank?: VaBank | null) =>
       payMutation.mutateAsync({ channel, bank }),
     isPaying: payMutation.isPending,
