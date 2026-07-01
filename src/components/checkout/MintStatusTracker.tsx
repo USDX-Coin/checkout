@@ -14,11 +14,14 @@ type StepState = "done" | "active" | "pending";
 
 function stepStates(order: MintOrderDetail): StepState[] {
   const paid = order.paymentStatus === "PAID";
-  const completed = order.status === "COMPLETED";
+  // On-chain "berhasil"/"Selesai" HANYA saat order COMPLETED DAN onChainTxHash terbukti
+  // terisi (USDX-293). PAID/WAITING_FOR_APPROVAL (Safe masih PENDING_APPROVAL, txHash
+  // kosong) = "sedang diproses", BUKAN berhasil — cegah user dikira sudah punya token.
+  const onChainDone = order.status === "COMPLETED" && Boolean(order.onChainTxHash);
   return [
     paid ? "done" : "active", // pembayaran
-    !paid ? "pending" : completed ? "done" : "active", // on-chain
-    completed ? "done" : "pending", // selesai
+    !paid ? "pending" : onChainDone ? "done" : "active", // on-chain
+    onChainDone ? "done" : "pending", // selesai
   ];
 }
 
