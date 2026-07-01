@@ -5,10 +5,12 @@
 // Polling berhenti saat order terminal (COMPLETED/FAILED) atau countdown habis (job
 // Expiry BE belum live, jadi FE menganggap `expiresAt` lampau = expired secara klien).
 //
-// DEMO mode (env.demoAutocomplete, dev/preview only): pipeline on-chain real
-// (Auto-Propose → Safe → COMPLETED) belum jalan di dev, jadi setelah bayar status tracker
-// DISIMULASIKAN maju PAID → COMPLETED tiap 2 detik. Override TAMPILAN saja (order di
-// backend tak berubah); OFF di prod.
+// DEMO mode (env.demoAutocomplete, dev/preview only): simulasikan HANYA konfirmasi
+// pembayaran (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval")
+// supaya demo lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak
+// W4 pipeline Safe real (Auto-Propose → sign → execute) jalan di dev; "on-chain berhasil"
+// HANYA dari backend real (status=COMPLETED + onChainTxHash). Override TAMPILAN saja; OFF di
+// prod (USDX-293: dulu demo maju paksa ke COMPLETED → user dikira sudah mint padahal belum).
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -81,31 +83,29 @@ export function useCheckout(id: string) {
     if (isUnauthorized) redirectToApp();
   }, [isUnauthorized]);
 
-  // ── DEMO auto-complete (env-gated, dev/preview) ────────────────────────────
-  // Begitu order ter-bayar (paymentStatus != REQUESTED): fase 1 (2s) → PAID
-  // (Pembayaran ✓, Proses on-chain aktif), fase 2 (4s) → COMPLETED (Selesai ✓).
-  const [demoPhase, setDemoPhase] = useState<0 | 1 | 2>(0);
+  // ── DEMO: simulasi konfirmasi bayar saja (env-gated, dev/preview) ───────────
+  // Setelah order ter-bayar (paymentStatus != REQUESTED), majukan TAMPILAN ke PAID /
+  // "menunggu approval" lalu BERHENTI. Settlement on-chain (COMPLETED + onChainTxHash)
+  // datang dari pipeline Safe real — demo tak lagi memalsukannya (USDX-293). Deps [paidish]
+  // stabil `true` setelah bayar → timer aman dari cleanup tiap poll.
+  const [demoPaid, setDemoPaid] = useState(false);
   const paidish = fetched !== null && fetched.paymentStatus !== "REQUESTED";
-  // Deps HANYA [paidish] (BUKAN demoPhase): polling refetch tiap 3s bikin re-render, dan
-  // kalau demoPhase masuk deps, cleanup-nya keburu clear timer fase 2 → mentok di "Proses
-  // on-chain", nggak pernah "Selesai". paidish stabil `true` setelah bayar → timer aman.
   useEffect(() => {
     if (!env.demoAutocomplete || !paidish) return;
-    const t1 = setTimeout(() => setDemoPhase(1), DEMO_STEP_MS);
-    const t2 = setTimeout(() => setDemoPhase(2), DEMO_STEP_MS * 2);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
+    const t = setTimeout(() => setDemoPaid(true), DEMO_STEP_MS);
+    return () => clearTimeout(t);
   }, [paidish]);
 
   const order = useMemo<MintOrderDetail | null>(() => {
-    if (!fetched || !env.demoAutocomplete || demoPhase === 0) return fetched;
-    if (demoPhase === 1) {
-      return { ...fetched, paymentStatus: "PAID", status: "WAITING_FOR_APPROVAL" };
-    }
-    return { ...fetched, paymentStatus: "PAID", safeStatus: "EXECUTED", status: "COMPLETED" };
-  }, [fetched, demoPhase]);
+    if (!fetched || !env.demoAutocomplete || !demoPaid) return fetched;
+    // "Menunggu approval" per conventions.md § Status Enums → Mint Order.
+    return {
+      ...fetched,
+      paymentStatus: "PAID",
+      status: "WAITING_FOR_APPROVAL",
+      safeStatus: "PENDING_APPROVAL",
+    };
+  }, [fetched, demoPaid]);
 
   // Tick 1 detik menggerakkan tampilan countdown.
   const [now, setNow] = useState(() => Date.now());

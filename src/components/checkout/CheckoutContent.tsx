@@ -296,7 +296,9 @@ export function CheckoutContent() {
     toast.success("Disalin");
   }
 
-  const isCompleted = order?.status === "COMPLETED";
+  // "Mint Berhasil" HANYA saat order COMPLETED DAN tx on-chain terbukti (onChainTxHash) —
+  // PAID/WAITING_FOR_APPROVAL tetap tampil "sedang diproses" (USDX-293).
+  const isCompleted = order?.status === "COMPLETED" && Boolean(order?.onChainTxHash);
   const showCountdown =
     Boolean(order) && !isExpired && order!.status !== "COMPLETED" && order!.status !== "FAILED";
 
