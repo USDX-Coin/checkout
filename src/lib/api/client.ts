@@ -1,10 +1,15 @@
 // Pembungkus fetch tipis untuk backend USDX (USDX-224, port dari app USDX-150).
-// Auth = **bearer JWT** yang di-handoff dari `app` lewat URL hash (USDX-239,
-// supersede cross-subdomain cookie): tiap request bawa `Authorization: Bearer
-// <token>` dari `sessionStorage` (lihat `@/lib/auth/token`) — BUKAN cookie /
-// `credentials:"include"`. Checkout tidak punya UI login; token datang dari
-// redirect `app`. Kalau token tak ada / kedaluwarsa → 401 → halaman redirect balik
-// ke `app` (lihat `useCheckout`).
+// Auth = **raw session token** hasil tukar one-time handoff code (USDX-378,
+// supersede bearer JWT di URL hash USDX-239): tiap request bawa `Authorization:
+// Bearer <token>` dari `sessionStorage` (lihat `@/lib/auth/token`) — BUKAN cookie /
+// `credentials:"include"`. Checkout tidak punya UI login; token didapat dengan
+// menukar `#code=` (redirect dari `app`) via `POST /api/v2/auth/checkout-token/
+// exchange` (lihat `@/lib/api/auth`). Kalau token tak ada / kedaluwarsa → 401 →
+// halaman redirect balik ke `app` (lihat `useCheckout`).
+//
+// Catatan: endpoint exchange bersifat PUBLIC/pre-auth. Saat menukarnya belum ada
+// token tersimpan, jadi request itu otomatis tanpa `Authorization` — persis yang
+// diinginkan.
 //
 // - Prepend `env.apiBaseUrl` agar request kena backend, bukan origin FE.
 // - Unwrap envelope SoT `{ status, metadata, data }` → kembalikan `data`.
@@ -92,7 +97,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   if (body !== undefined && !finalHeaders.has("Content-Type")) {
     finalHeaders.set("Content-Type", "application/json");
   }
-  // Bearer JWT dari sessionStorage (handoff `#token=` dari app, USDX-239).
+  // Raw session token dari sessionStorage (hasil exchange `#code=`, USDX-378).
   const token = getToken();
   if (token && !finalHeaders.has("Authorization")) {
     finalHeaders.set("Authorization", `Bearer ${token}`);

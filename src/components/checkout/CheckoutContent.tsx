@@ -288,7 +288,7 @@ export function CheckoutContent() {
   const router = useRouter();
   const params = useParams<{ orderId: string }>();
   const id = params.orderId;
-  const { order, isLoading, isError, pay, isPaying, payError, secondsLeft, isExpired } =
+  const { order, isLoading, isError, isUnauthorized, pay, isPaying, payError, secondsLeft, isExpired } =
     useCheckout(id);
 
   function copy(text: string) {
@@ -308,6 +308,19 @@ export function CheckoutContent() {
         <Card>
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
             <Loader2 className="size-5 animate-spin" /> Memuat pesanan…
+          </div>
+        </Card>
+      ) : isUnauthorized ? (
+        // Sesi checkout kedaluwarsa (code handoff invalid/kedaluwarsa/terpakai, atau
+        // token sesi dicabut). Prod: hook sudah redirect ke `app`; layar ini muncul
+        // saat redirect no-op (mis. localhost tanpa NEXT_PUBLIC_APP_URL). USDX-378.
+        <Card>
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <p className="text-sm font-medium text-destructive">Sesi checkout kedaluwarsa</p>
+            <p className="text-sm text-muted-foreground">
+              Buka ulang halaman ini dari aplikasi USDX untuk melanjutkan.
+            </p>
+            <BackButton onClick={() => router.back()} />
           </div>
         </Card>
       ) : isError || !order ? (
