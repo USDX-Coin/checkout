@@ -5,6 +5,11 @@
 // Polling berhenti saat order terminal (COMPLETED/FAILED) atau countdown habis (job
 // Expiry BE belum live, jadi FE menganggap `expiresAt` lampau = expired secara klien).
 //
+// Auth (USDX-378): saat halaman dibuka, tukar one-time `#code=` handoff → raw session
+// token via POST /api/v2/auth/checkout-token/exchange SEBELUM GET pertama (gating), lalu
+// pakai token itu sebagai bearer. Code invalid/kedaluwarsa/terpakai (401) → sesi tak valid
+// → redirect balik ke `app`. Refresh dalam tab pakai token tersimpan (sessionStorage).
+//
 // DEMO mode (env.demoAutocomplete, dev/preview only): simulasikan HANYA konfirmasi
 // pembayaran (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval")
 // supaya demo lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak
@@ -15,8 +20,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
+import { exchangeHandoffCode } from "@/lib/api/auth";
 import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
-import { captureTokenFromHash } from "@/lib/auth/token";
+import { readHandoffCodeFromHash, getToken, setToken } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
 import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
@@ -43,19 +49,43 @@ function payErrorMessage(error: unknown): string | null {
 export function useCheckout(id: string) {
   const queryClient = useQueryClient();
 
-  // Capture token handoff dari URL hash SEBELUM fetch pertama (anti-race, ref USDX-58).
-  // useState lazy-init jalan sekali saat render pertama (sebelum effect & sebelum queryFn
-  // React Query), jadi `getToken()` sudah terisi ketika GET pertama jalan. Idempoten +
-  // SSR-safe (lihat token.ts).
-  useState(() => {
-    captureTokenFromHash();
-    return true;
+  // Baca one-time handoff `#code=` dari URL hash SEKALI saat render pertama (lazy
+  // useState jalan sebelum effect & sebelum queryFn React Query) + STRIP dari URL
+  // (anti-replay dari history/Referer). SSR-safe (lihat token.ts).
+  const [handoffCode] = useState<string | null>(() => readHandoffCodeFromHash());
+  // Sesi hasil handoff sebelumnya (refresh dalam tab) sudah tersimpan → tak perlu
+  // tukar lagi. Dibaca sekali agar tidak berubah antar-render.
+  const [alreadyAuthed] = useState<boolean>(() => getToken() !== null);
+
+  // Tukar `code` → raw session token (public/pre-auth), simpan sbg bearer SEBELUM GET
+  // pertama (anti-race). Jalan hanya bila ada `code` DAN belum punya token.
+  // `retry: false` — code sekali-pakai; kalau di-retry, percobaan ke-2 pasti 401
+  // (sudah terpakai). `staleTime: Infinity` — jangan refetch (code sudah di-strip).
+  const needsExchange = Boolean(handoffCode) && !alreadyAuthed;
+  const exchange = useQuery({
+    queryKey: ["checkout-token-exchange", id],
+    queryFn: async () => {
+      const token = await exchangeHandoffCode(handoffCode!);
+      // Simpan di dalam queryFn (sebelum status `success`) supaya token pasti sudah
+      // ada di sessionStorage saat GET mint di-enable — tidak bergantung urutan effect.
+      setToken(token);
+      return token;
+    },
+    enabled: needsExchange,
+    retry: false,
+    staleTime: Infinity,
   });
+
+  // Selama exchange masih jalan, tunda GET mint. Kalau exchange gagal (code invalid/
+  // kedaluwarsa/terpakai → 401 INVALID_HANDOFF_CODE), jangan GET sama sekali — sesi
+  // tak valid, langsung ke jalur redirect.
+  const waitingForExchange = needsExchange && exchange.isPending;
+  const exchangeFailed = needsExchange && exchange.isError;
 
   const query = useQuery({
     queryKey: ["mint-order", id],
     queryFn: () => getMintOrder(id),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && !waitingForExchange && !exchangeFailed,
     retry: false,
     refetchInterval: (q) => {
       const o = q.state.data;
@@ -75,10 +105,13 @@ export function useCheckout(id: string) {
 
   const fetched = query.data ?? null;
 
-  // 401 (token absen / kedaluwarsa) → balik ke `app` untuk re-auth (USDX-239). Kalau
-  // `appUrl` tak di-set (mis. localhost) → redirectToApp() no-op, UI tampilkan state
-  // error + tombol Kembali.
-  const isUnauthorized = isApiError(query.error) && query.error.status === 401;
+  // Sesi checkout tak valid → balik ke `app` untuk re-auth (USDX-378). Dua sumber:
+  //  - exchange 401 INVALID_HANDOFF_CODE (code salah/kedaluwarsa/terpakai), atau
+  //  - GET mint 401 (token hasil exchange kedaluwarsa/dicabut di tengah sesi).
+  // Kalau `appUrl` tak di-set (mis. localhost) → redirectToApp() no-op, UI tampilkan
+  // pesan "sesi checkout kedaluwarsa" + tombol Kembali (lihat CheckoutContent).
+  const isUnauthorized =
+    exchangeFailed || (isApiError(query.error) && query.error.status === 401);
   useEffect(() => {
     if (isUnauthorized) redirectToApp();
   }, [isUnauthorized]);
@@ -129,7 +162,8 @@ export function useCheckout(id: string) {
 
   return {
     order,
-    isLoading: query.isLoading,
+    // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan).
+    isLoading: waitingForExchange || query.isLoading,
     isError: query.isError,
     isUnauthorized,
     pay: (channel: PaymentChannel, bank?: VaBank | null) =>

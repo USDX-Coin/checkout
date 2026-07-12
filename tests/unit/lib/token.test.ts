@@ -1,73 +1,80 @@
 import { describe, test, expect, beforeEach } from "vitest";
 import {
-  captureTokenFromHash,
+  readHandoffCodeFromHash,
   getToken,
+  setToken,
   clearToken,
   CHECKOUT_TOKEN_KEY,
 } from "@/lib/auth/token";
 
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
   // Reset to a clean checkout URL (no hash) before each case.
   window.history.replaceState(null, "", "/checkout/ord_1");
 });
 
-describe("token — URL-hash handoff (USDX-239)", () => {
-  describe("captureTokenFromHash", () => {
-    test("reads #token, stores it to sessionStorage, and returns it", () => {
-      window.location.hash = "#token=jwt-abc";
-      const tok = captureTokenFromHash();
-      expect(tok).toBe("jwt-abc");
-      expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("jwt-abc");
+describe("token — one-time handoff code (USDX-378, WSTG-CLNT-12)", () => {
+  describe("readHandoffCodeFromHash", () => {
+    test("reads #code and returns it (WITHOUT storing — code is single-use, not a credential)", () => {
+      window.location.hash = "#code=hc-abc";
+      const code = readHandoffCodeFromHash();
+      expect(code).toBe("hc-abc");
+      // Code must NOT be persisted; only the exchanged session token is stored later.
+      expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBeNull();
+      expect(sessionStorage.length).toBe(0);
     });
 
-    test("strips #token from the URL after capture (no credential left in URL)", () => {
-      window.location.hash = "#token=jwt-abc";
-      captureTokenFromHash();
+    test("strips #code from the URL after read (no code left in URL/history/Referer)", () => {
+      window.location.hash = "#code=hc-abc";
+      readHandoffCodeFromHash();
       expect(window.location.hash).toBe("");
     });
 
-    test("URL-decodes the token (app sends encodeURIComponent)", () => {
-      window.location.hash = "#token=" + encodeURIComponent("a.b+c/d=");
-      expect(captureTokenFromHash()).toBe("a.b+c/d=");
+    test("URL-decodes the code (app sends encodeURIComponent)", () => {
+      window.location.hash = "#code=" + encodeURIComponent("a.b+c/d=");
+      expect(readHandoffCodeFromHash()).toBe("a.b+c/d=");
     });
 
-    test("returns null and stores nothing when there is no #token", () => {
-      const tok = captureTokenFromHash();
-      expect(tok).toBeNull();
+    test("returns null when there is no #code", () => {
+      const code = readHandoffCodeFromHash();
+      expect(code).toBeNull();
+    });
+
+    test("ignores a legacy #token= handoff (old insecure bearer-in-URL is no longer honored)", () => {
+      window.location.hash = "#token=jwt-legacy";
+      expect(readHandoffCodeFromHash()).toBeNull();
       expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBeNull();
     });
 
-    test("overwrites a previously stored token on a fresh handoff", () => {
-      sessionStorage.setItem(CHECKOUT_TOKEN_KEY, "old");
-      window.location.hash = "#token=new";
-      captureTokenFromHash();
-      expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("new");
-    });
-
-    test("is idempotent — second call (hash already stripped) keeps the token", () => {
-      window.location.hash = "#token=jwt-abc";
-      captureTokenFromHash();
-      const second = captureTokenFromHash();
-      expect(second).toBeNull(); // nothing new in URL
-      expect(getToken()).toBe("jwt-abc"); // still authorized (refresh-safe)
+    test("is idempotent — second call (hash already stripped) returns null", () => {
+      window.location.hash = "#code=hc-abc";
+      expect(readHandoffCodeFromHash()).toBe("hc-abc");
+      expect(readHandoffCodeFromHash()).toBeNull();
     });
   });
 
-  describe("getToken", () => {
-    test("returns the stored token (survives without a hash → refresh-safe)", () => {
-      sessionStorage.setItem(CHECKOUT_TOKEN_KEY, "jwt-xyz");
-      expect(getToken()).toBe("jwt-xyz");
+  describe("setToken / getToken", () => {
+    test("setToken stores the exchanged session token in sessionStorage; getToken reads it back", () => {
+      setToken("sess-xyz");
+      expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("sess-xyz");
+      expect(getToken()).toBe("sess-xyz");
     });
 
-    test("returns null when nothing is stored (other tab/device → 401 path)", () => {
+    test("session token is NEVER written to localStorage (WSTG-CLNT-12)", () => {
+      setToken("sess-xyz");
+      expect(localStorage.getItem(CHECKOUT_TOKEN_KEY)).toBeNull();
+      expect(localStorage.length).toBe(0);
+    });
+
+    test("getToken returns null when nothing is stored (other tab/device → redirect path)", () => {
       expect(getToken()).toBeNull();
     });
   });
 
   describe("clearToken", () => {
     test("removes the stored token", () => {
-      sessionStorage.setItem(CHECKOUT_TOKEN_KEY, "jwt");
+      setToken("sess-1");
       clearToken();
       expect(getToken()).toBeNull();
     });
