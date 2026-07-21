@@ -4,13 +4,13 @@
 // - `apiBaseUrl` — base URL backend (`/api/v2/*`). Diisi per environment (Netlify /
 //   .env.local). Checkout SELALU hit backend real, tanpa layer mock (keputusan 2026-06-19).
 //
-// Auth = bearer JWT yang di-handoff dari `app` lewat URL hash (USDX-239): client
-// kirim `Authorization: Bearer <token>` dari sessionStorage, BUKAN cookie. Lihat
-// `@/lib/auth/token`.
+// Auth = raw session token hasil tukar one-time `#code=` handoff dari `app` (USDX-378):
+// client kirim `Authorization: Bearer <token>` dari sessionStorage, BUKAN cookie. Lihat
+// `@/lib/auth/token` + `@/lib/api/auth`.
 //
-// - `appUrl` — URL `app` consumer untuk redirect balik saat `401` (token absen /
-//   kedaluwarsa). Diisi per environment (Netlify). Kalau kosong → fallback
-//   `router.back()` (mis. localhost dev).
+// - `appUrl` — URL `app` consumer untuk redirect balik saat sesi tak valid (code
+//   handoff invalid/kedaluwarsa/terpakai, atau token sesi 401). Diisi per environment
+//   (Netlify). Kalau kosong → fallback `router.back()` (mis. localhost dev).
 //
 // - `demoAutocomplete` — DEMO only (dev/preview): simulasikan status tracker maju ke
 //   "Selesai" setelah bayar (pipeline on-chain real belum jalan di dev). Display-only;

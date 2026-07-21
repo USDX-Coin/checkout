@@ -28,7 +28,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("apiFetch (checkout — bearer JWT, USDX-239)", () => {
+describe("apiFetch (checkout — bearer session token from exchange, USDX-378)", () => {
   describe("auth", () => {
     test("attaches Authorization: Bearer from the sessionStorage token", async () => {
       sessionStorage.setItem(CHECKOUT_TOKEN_KEY, "tok-123");

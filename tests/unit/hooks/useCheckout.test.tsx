@@ -1,6 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor, createWrapper } from "../../helpers/test-utils";
-import { CHECKOUT_TOKEN_KEY } from "@/lib/auth/token";
+import { CHECKOUT_TOKEN_KEY, setToken } from "@/lib/auth/token";
 import type { MintOrderDetail } from "@/types";
 
 // Mock redirect supaya 401 tidak benar-benar menavigasi (jsdom), tapi tetap bisa
@@ -75,23 +75,96 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("useCheckout — auth (USDX-239)", () => {
-  test("captures #token before the first GET → first request carries Authorization: Bearer (anti-race)", async () => {
-    window.location.hash = "#token=tok-1";
-    fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
+// URL yang membedakan endpoint exchange dari GET mint.
+function routeFetch(handlers: {
+  exchange?: () => Response;
+  mint?: (init?: RequestInit) => Response;
+}) {
+  return (url: string, init?: RequestInit) => {
+    if (url.includes("/auth/checkout-token/exchange")) {
+      return Promise.resolve(
+        handlers.exchange?.() ??
+          jsonResponse(200, { status: "success", data: { token: "sess-default" } }),
+      );
+    }
+    return Promise.resolve(
+      handlers.mint?.(init) ?? jsonResponse(200, { status: "success", data: makeOrder() }),
+    );
+  };
+}
+
+describe("useCheckout — auth exchange (USDX-378)", () => {
+  test("exchanges #code before the first GET → GET carries the exchanged session token; code stripped, not persisted", async () => {
+    window.location.hash = "#code=hc-1";
+    fetchMock.mockImplementation(
+      routeFetch({
+        exchange: () => jsonResponse(200, { status: "success", data: { token: "sess-1" } }),
+        mint: () => jsonResponse(200, { status: "success", data: makeOrder() }),
+      }),
+    );
 
     const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect((init.headers as Headers).get("Authorization")).toBe("Bearer tok-1");
-    // Token di-strip dari URL begitu di-capture.
+    // Exchange dipanggil: POST { code }, pre-auth (tanpa Authorization).
+    const exchangeCall = fetchMock.mock.calls.find(([u]) =>
+      (u as string).includes("/auth/checkout-token/exchange"),
+    );
+    expect(exchangeCall?.[1].method).toBe("POST");
+    expect(exchangeCall?.[1].body).toBe(JSON.stringify({ code: "hc-1" }));
+    expect((exchangeCall?.[1].headers as Headers).get("Authorization")).toBeNull();
+
+    // GET mint memakai token hasil exchange sebagai bearer (anti-race).
+    const getCall = fetchMock.mock.calls.find(
+      ([u, i]) => (u as string).includes("/mint/ord_1") && (i as RequestInit)?.method === "GET",
+    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-1");
+
+    // Code di-strip dari URL; hanya session token yang tersimpan (bukan code).
     expect(window.location.hash).toBe("");
-    // Tersimpan → refresh-safe.
-    expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("tok-1");
+    expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("sess-1");
   });
 
-  test("401 → flags isUnauthorized and redirects back to app", async () => {
+  test("invalid/expired #code → exchange 401 INVALID_HANDOFF_CODE → isUnauthorized + redirect, NO mint GET", async () => {
+    window.location.hash = "#code=stale";
+    fetchMock.mockImplementation(
+      routeFetch({
+        exchange: () =>
+          jsonResponse(401, {
+            status: "error",
+            error: { code: "INVALID_HANDOFF_CODE", message: "kode tidak valid" },
+          }),
+      }),
+    );
+
+    const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isUnauthorized).toBe(true));
+    expect(mockRedirect).toHaveBeenCalled();
+
+    // Sesi tak valid → jangan sentuh GET mint sama sekali.
+    const hitMint = fetchMock.mock.calls.some(([u]) => (u as string).includes("/mint/"));
+    expect(hitMint).toBe(false);
+    expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBeNull();
+  });
+
+  test("refresh in-tab (token tersimpan, tanpa #code) → GET pakai bearer tanpa exchange ulang", async () => {
+    setToken("sess-kept");
+    fetchMock.mockImplementation(routeFetch({}));
+
+    const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.order).not.toBeNull());
+
+    // Tak ada panggilan exchange (sudah authed).
+    const exchanged = fetchMock.mock.calls.some(([u]) =>
+      (u as string).includes("/auth/checkout-token/exchange"),
+    );
+    expect(exchanged).toBe(false);
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Headers).get("Authorization")).toBe("Bearer sess-kept");
+  });
+
+  test("mint GET 401 (session token dicabut/kedaluwarsa mid-sesi) → isUnauthorized + redirect", async () => {
+    setToken("sess-x");
     fetchMock.mockResolvedValue(
       jsonResponse(401, { status: "error", error: { code: "UNAUTHORIZED", message: "no session" } }),
     );
@@ -102,6 +175,7 @@ describe("useCheckout — auth (USDX-239)", () => {
   });
 
   test("a 404 does NOT trigger the app redirect (order bukan milik user)", async () => {
+    setToken("sess-x");
     fetchMock.mockResolvedValue(
       jsonResponse(404, { status: "error", error: { code: "NOT_FOUND", message: "nope" } }),
     );
