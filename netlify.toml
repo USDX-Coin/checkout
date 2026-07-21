@@ -19,16 +19,6 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
-# Env per context — isi nilai final di Netlify UI (Site settings → Environment variables).
-# Auth checkout = bearer JWT di-handoff via URL hash dari `app` (USDX-239) — BUKAN cookie.
-# NEXT_PUBLIC_API_BASE_URL: origin backend yang diizinkan CORS (`CORS_ORIGINS`).
-#   dev/preview → https://api-dev.usdx.co.id ; staging/prod → https://api.usdx.co.id.
-# NEXT_PUBLIC_APP_URL: URL `app` untuk redirect-balik saat 401 (isi per-env di Netlify UI).
-# NEXT_PUBLIC_DEMO_AUTOCOMPLETE: status tracker disimulasikan maju ke "Selesai" setelah
-# bayar (pipeline on-chain real belum jalan di dev). DEV/PREVIEW ONLY — JANGAN set di prod.
-[context.deploy-preview.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
-  NEXT_PUBLIC_DEMO_AUTOCOMPLETE = "true"
-[context.branch-deploy.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://api-dev.usdx.co.id"
-  NEXT_PUBLIC_DEMO_AUTOCOMPLETE = "true"
+# Env build (NEXT_PUBLIC_*) di-set di Netlify UI per deploy context / branch —
+# seragam dengan app & back-office (keputusan 2026-07-21). JANGAN tambah
+# [context.*.environment] di sini: nilai netlify.toml menimpa nilai Netlify UI.
