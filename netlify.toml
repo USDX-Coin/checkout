@@ -6,8 +6,10 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Security headers — halaman ini pegang alur pembayaran, jadi origin sendiri + header ketat.
-# Internal-only: checkout dicapai via top-level redirect dari `app` (BUKAN iframe) → DENY framing aman.
+# Security headers — halaman ini pegang alur pembayaran + bearer token (handoff via URL hash,
+# USDX-239), jadi origin sendiri + header ketat. `Referrer-Policy: strict-origin-when-cross-origin`
+# (+ fragment hash TIDAK terkirim di Referer) membatasi kebocoran token. Internal-only: checkout
+# dicapai via top-level redirect dari `app` (BUKAN iframe) → DENY framing aman.
 # Saat jalur partner masuk nanti: ganti `frame-ancestors 'none'` jadi allowlist per partner.
 [[headers]]
   for = "/*"
@@ -17,9 +19,6 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
-# Env per context — isi nilai final di Netlify UI (Site settings → Environment variables).
-# dev/preview → backend dev; staging/prod → idealnya https://api.usdx.co.id (lihat USDX-222).
-[context.deploy-preview.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://usdx-backend-development.up.railway.app"
-[context.branch-deploy.environment]
-  NEXT_PUBLIC_API_BASE_URL = "https://usdx-backend-development.up.railway.app"
+# Env build (NEXT_PUBLIC_*) di-set di Netlify UI per deploy context / branch —
+# seragam dengan app & back-office (keputusan 2026-07-21). JANGAN tambah
+# [context.*.environment] di sini: nilai netlify.toml menimpa nilai Netlify UI.

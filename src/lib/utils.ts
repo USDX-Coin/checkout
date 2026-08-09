@@ -5,11 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Tampilkan IDR sebagai rupiah bulat (tanpa ,00 di belakang) biar bersih dibaca —
+// nominal otoritatif tetap dari backend (string desimal); ini display-only.
 export function formatIDR(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `Rp ${new Intl.NumberFormat("id-ID", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
   }).format(value)}`;
 }
 

@@ -145,3 +145,14 @@
     color: var(--foreground);
   }
 }
+
+/*
+ * Brand gradient surface (Figma) — maroon primary untuk tombol utama (mis. "Bayar
+ * Sekarang" di checkout). Disamakan dengan repo `app` agar konsisten visual.
+ */
+.brand-gradient {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(90deg, var(--brand-from) 0%, var(--brand-from) 100%);
+  box-shadow: 0 1px 2px 0 rgba(128, 0, 0, 0.4), 0 0 0 1px var(--brand-from);
+}
