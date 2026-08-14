@@ -8,7 +8,19 @@ import { Check, Loader2, X } from "lucide-react";
 import type { MintOrderDetail } from "@/types";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["Pembayaran", "Proses on-chain", "Selesai"];
+// `activeHint` tampil HANYA saat langkahnya berjalan. "Proses on-chain" praktiknya = menunggu
+// tanda tangan multisig Safe — bisa menit, bisa jam, tergantung penandatangan. Tanpa keterangan,
+// user cuma melihat lingkaran berputar dan mengira halaman ini harus ditunggui. Sengaja TANPA
+// estimasi waktu: kita tak menguasai kapan penandatangan membuka antrean.
+const STEPS: { label: string; activeHint: string | null }[] = [
+  { label: "Pembayaran", activeHint: null },
+  {
+    label: "Proses on-chain",
+    activeHint:
+      "Pesanan sedang diproses & menunggu persetujuan. Token akan otomatis masuk ke wallet setelah selesai — halaman ini boleh ditutup.",
+  },
+  { label: "Selesai", activeHint: null },
+];
 
 type StepState = "done" | "active" | "pending";
 
@@ -57,17 +69,22 @@ export function MintStatusTracker({ order }: { order: MintOrderDetail }) {
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-foreground">Status transaksi</p>
       <ol className="flex flex-col gap-2.5">
-        {STEPS.map((label, i) => (
-          <li key={label} className="flex items-center gap-2.5">
+        {STEPS.map(({ label, activeHint }, i) => (
+          <li key={label} className="flex items-start gap-2.5">
             <StepIcon state={states[i]} />
-            <span
-              className={cn(
-                "text-sm",
-                states[i] === "pending" ? "text-muted-foreground" : "font-medium text-foreground",
+            <div className="flex flex-col gap-0.5 pt-0.5">
+              <span
+                className={cn(
+                  "text-sm",
+                  states[i] === "pending" ? "text-muted-foreground" : "font-medium text-foreground",
+                )}
+              >
+                {label}
+              </span>
+              {activeHint && states[i] === "active" && (
+                <span className="text-xs leading-relaxed text-muted-foreground">{activeHint}</span>
               )}
-            >
-              {label}
-            </span>
+            </div>
           </li>
         ))}
       </ol>

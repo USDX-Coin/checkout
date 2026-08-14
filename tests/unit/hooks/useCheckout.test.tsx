@@ -274,3 +274,118 @@ describe("useCheckout — baseline (behavior yang harus tetap, characterization)
     await waitFor(() => expect(result.current.payError).toContain("tidak lagi bisa memilih metode"));
   });
 });
+
+// Tugas 6 poin 2/3 — `expiresAt` adalah batas jendela BAYAR, bukan umur order. Setelah PAID,
+// order menunggu persetujuan multisig yang bisa berjam-jam; memperlakukan batas itu sebagai
+// kedaluwarsa membuat user yang sudah transfer melihat "Pesanan kedaluwarsa" dan polling
+// berhenti sebelum COMPLETED sempat terbaca.
+describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)", () => {
+  const LEWAT = new Date(Date.now() - 60_000).toISOString();
+
+  function paidPastWindow(o: Partial<MintOrderDetail> = {}): MintOrderDetail {
+    return makeOrder({
+      paymentStatus: "PAID",
+      status: "WAITING_FOR_APPROVAL",
+      safeStatus: "PENDING_APPROVAL",
+      expiresAt: LEWAT,
+      ...o,
+    });
+  }
+
+  describe("positive", () => {
+    test("PAID lewat expiresAt → BUKAN expired", async () => {
+      fetchMock.mockImplementation(
+        routeFetch({ mint: () => jsonResponse(200, { status: "success", data: paidPastWindow() }) }),
+      );
+
+      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+
+      expect(result.current.isExpired).toBe(false);
+    });
+
+    test("PAID lewat expiresAt → polling JALAN TERUS sampai COMPLETED terbaca", async () => {
+      let hits = 0;
+      fetchMock.mockImplementation(
+        routeFetch({
+          mint: () => {
+            hits += 1;
+            return jsonResponse(200, { status: "success", data: paidPastWindow() });
+          },
+        }),
+      );
+
+      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+
+      const afterFirst = hits;
+      await waitFor(() => expect(hits).toBeGreaterThan(afterFirst), { timeout: 6000 });
+      expect(result.current.isExpired).toBe(false);
+    }, 10_000);
+  });
+
+  describe("negative", () => {
+    test("BELUM dibayar + lewat expiresAt → tetap expired", async () => {
+      fetchMock.mockImplementation(
+        routeFetch({
+          mint: () =>
+            jsonResponse(200, {
+              status: "success",
+              data: makeOrder({ paymentStatus: "WAITING_FOR_PAYMENT", expiresAt: LEWAT }),
+            }),
+        }),
+      );
+
+      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+
+      expect(result.current.isExpired).toBe(true);
+    });
+  });
+
+  describe("edge cases", () => {
+    test("paymentStatus EXPIRED dari backend → expired walau timer klien belum habis", async () => {
+      fetchMock.mockImplementation(
+        routeFetch({
+          mint: () =>
+            jsonResponse(200, {
+              status: "success",
+              data: makeOrder({
+                paymentStatus: "EXPIRED",
+                expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              }),
+            }),
+        }),
+      );
+
+      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+
+      expect(result.current.isExpired).toBe(true);
+    });
+
+    test("COMPLETED lewat expiresAt → terminal, bukan expired", async () => {
+      fetchMock.mockImplementation(
+        routeFetch({
+          mint: () =>
+            jsonResponse(200, {
+              status: "success",
+              data: makeOrder({
+                paymentStatus: "PAID",
+                status: "COMPLETED",
+                safeStatus: "EXECUTED",
+                onChainTxHash: "0xdead",
+                expiresAt: LEWAT,
+              }),
+            }),
+        }),
+      );
+
+      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+
+      expect(result.current.isExpired).toBe(false);
+      expect(result.current.isTerminal).toBe(true);
+    });
+  });
+});

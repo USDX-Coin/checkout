@@ -4,6 +4,10 @@
 
 export type PaymentChannel = "VA" | "QRIS";
 
+// Apakah pembayaran order ini benar-benar diproses ke bank, atau cuma disimulasikan mock
+// provider. Dikirim backend (mint-order.serializer.ts), diturunkan dari provider per-order.
+export type PaymentMode = "SIMULATION" | "LIVE";
+
 // 9 bank VA yang didukung provider (common.yaml VaBank).
 export type VaBank =
   | "BCA"
@@ -20,13 +24,23 @@ export type AmountCurrency = "USD" | "IDR";
 export type ConsumerOrderType = "MINT" | "REDEEM";
 
 // 3 dimensi status order mint (conventions.md § Status Enums → Mint Order).
-export type MintPaymentStatus = "REQUESTED" | "WAITING_FOR_PAYMENT" | "PAID" | "EXPIRED";
+// HELD = transfer sudah masuk tapi tak bisa dicocokkan otomatis (nominal kurang/lebih, telat,
+// atau dobel) dan ditahan untuk ditinjau ops. Ada di SoT (common.yaml) & enum DB sejak USDX-349,
+// tapi dulu tak dikenal checkout — akibatnya order HELD jatuh ke layar tagihan, padahal justru
+// populasi itu yang paling rawan transfer dua kali.
+export type MintPaymentStatus =
+  | "REQUESTED"
+  | "WAITING_FOR_PAYMENT"
+  | "PAID"
+  | "EXPIRED"
+  | "HELD";
 export type MintSafeStatus = "NONE" | "PENDING_APPROVAL" | "APPROVED" | "EXECUTED" | "REJECTED";
 export type MintOrderStatus =
   | "WAITING_FOR_PAYMENT"
   | "WAITING_FOR_APPROVAL"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "HELD"; // cermin denormalisasi dari paymentStatus HELD
 
 // Satu channel pembayaran yang ditawarkan (VA bawa daftar bank; QRIS tidak).
 export interface MintChannelOption {
@@ -62,6 +76,10 @@ export interface MintOrderDetail {
   safeStatus: MintSafeStatus;
   status: MintOrderStatus;
   paymentProvider: string;
+  // OPTIONAL dengan sengaja: backend yang belum membawa field ini (atau nilai baru yang belum
+  // dikenal FE) harus jatuh ke perlakuan LIVE — banner "pembayaran tidak diproses ke bank
+  // sungguhan" tak boleh muncul kecuali backend benar-benar bilang "SIMULATION".
+  paymentMode?: PaymentMode;
   virtualAccountNo: string | null;
   paymentUrl: string | null;
   paymentRef: string | null;

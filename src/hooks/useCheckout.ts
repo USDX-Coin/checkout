@@ -90,7 +90,10 @@ export function useCheckout(id: string) {
     refetchInterval: (q) => {
       const o = q.state.data;
       if (!o || TERMINAL.has(o.status)) return false;
-      if (new Date(o.expiresAt).getTime() <= Date.now()) return false; // expired → stop
+      // `expiresAt` = batas jendela BAYAR. Order yang sudah PAID lewat batas itu bukan expired —
+      // ia sedang menunggu persetujuan multisig yang bisa berjam-jam. Kalau polling ikut berhenti
+      // di situ, halaman tak akan pernah tahu order sudah COMPLETED (Tugas 6 poin 2/3).
+      if (o.paymentStatus !== "PAID" && new Date(o.expiresAt).getTime() <= Date.now()) return false;
       // Poll selama menunggu konfirmasi pembayaran / settlement on-chain.
       const polling = o.paymentStatus === "WAITING_FOR_PAYMENT" || o.status === "WAITING_FOR_APPROVAL";
       if (!polling) return false;
@@ -151,7 +154,15 @@ export function useCheckout(id: string) {
   const secondsLeft = order
     ? Math.max(0, Math.floor((new Date(order.expiresAt).getTime() - now) / 1000))
     : 0;
-  const isExpired = Boolean(order) && !isTerminal && secondsLeft <= 0;
+  // Sudah dibayar = jendela bayar tak berlaku lagi; layar "Pesanan kedaluwarsa" untuk user yang
+  // sudah transfer adalah kebohongan yang bikin panik. Selain itu, hormati juga EXPIRED dari
+  // backend walau timer klien belum habis (jam klien bisa mundur).
+  const isPaid = order?.paymentStatus === "PAID";
+  const isExpired =
+    Boolean(order) &&
+    !isTerminal &&
+    !isPaid &&
+    (order!.paymentStatus === "EXPIRED" || secondsLeft <= 0);
 
   const payMutation = useMutation({
     mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) => payMintOrder(id, vars),
@@ -160,8 +171,15 @@ export function useCheckout(id: string) {
     },
   });
 
+  // Apakah `order` yang dikembalikan sedang DIPALSUKAN mode demo. Wajib diteruskan ke UI:
+  // demo memaksa paymentStatus=PAID tanpa satu rupiah pun berpindah, dan layar "Pembayaran
+  // diterima" tak bisa dibedakan dari yang sungguhan. Justru berbahaya di dev — di situ UAT
+  // DurianPay sandbox dijalankan.
+  const isDemoOverride = env.demoAutocomplete && demoPaid && fetched !== null;
+
   return {
     order,
+    isDemoOverride,
     // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan).
     isLoading: waitingForExchange || query.isLoading,
     isError: query.isError,
