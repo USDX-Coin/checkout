@@ -4,6 +4,10 @@
 
 export type PaymentChannel = "VA" | "QRIS";
 
+// Apakah pembayaran order ini benar-benar diproses ke bank, atau cuma disimulasikan mock
+// provider. Dikirim backend (mint-order.serializer.ts), diturunkan dari provider per-order.
+export type PaymentMode = "SIMULATION" | "LIVE";
+
 // 9 bank VA yang didukung provider (common.yaml VaBank).
 export type VaBank =
   | "BCA"
@@ -62,6 +66,10 @@ export interface MintOrderDetail {
   safeStatus: MintSafeStatus;
   status: MintOrderStatus;
   paymentProvider: string;
+  // OPTIONAL dengan sengaja: backend yang belum membawa field ini (atau nilai baru yang belum
+  // dikenal FE) harus jatuh ke perlakuan LIVE — banner "pembayaran tidak diproses ke bank
+  // sungguhan" tak boleh muncul kecuali backend benar-benar bilang "SIMULATION".
+  paymentMode?: PaymentMode;
   virtualAccountNo: string | null;
   paymentUrl: string | null;
   paymentRef: string | null;

@@ -5,6 +5,14 @@
 // /pay → instruksi bayar (VA grouped + warning / QRIS QR asli + unduh) + accordion cara
 // bayar + status tracker; saat COMPLETED → layar sukses (jumlah USDX + tx on-chain + CTA).
 // Standalone: "Kembali" pakai router.back() (user tiba via redirect dari app).
+//
+// Tugas 6 (catatan/TUGAS-6-PERBAIKI-CHECKOUT.md) menambah dua aturan yang menyangkut uang:
+//  1. Banner "Mode simulasi" HANYA saat backend bilang paymentMode === "SIMULATION". Dulu
+//     hardcoded — di dev (DurianPay SNAP sandbox) sudah salah, di prod ia akan memberi tahu
+//     user yang mau transfer sungguhan bahwa uangnya tidak diproses.
+//  2. PAID (belum COMPLETED) punya layarnya sendiri: konfirmasi "Pembayaran diterima", BUKAN
+//     nomor VA + "Jumlah yang harus dibayar" — order menunggu multisig dan bisa lama, user
+//     yang membaca tagihan lama itu bisa transfer dua kali.
 
 import { useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -15,7 +23,7 @@ import { useCheckout } from "@/hooks/useCheckout";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { BANK_BRAND, QRIS_RED, VA_BANKS } from "@/lib/constants";
-import { formatIDR, formatCountdown, truncateAddress } from "@/lib/utils";
+import { formatIDR, formatCountdown, formatWibDateTime, truncateAddress } from "@/lib/utils";
 import type { MintChannelOption, MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
 // Kelompokkan digit per 4 biar nomor VA gampang dibaca (8878 4716 9037 8849).
@@ -136,6 +144,9 @@ function PaymentInstructions({
   const bankBrand = order.paymentBank ? BANK_BRAND[order.paymentBank] : null;
   return (
     <div className="flex flex-col gap-3">
+      {/* Logo bank sudah memuat nama banknya sendiri — menuliskannya lagi bikin "BCA BCA".
+          Nama tetap ada untuk pembaca layar lewat alt. Badge singkatan (tanpa logo) TIDAK
+          selalu terbaca ("MDR", "PRM"), jadi di jalur itu namanya tetap ditulis. */}
       {order.paymentBank && bankBrand && (
         <Row label="Virtual Account">
           {bankBrand.logo ? (
@@ -148,14 +159,16 @@ function PaymentInstructions({
               />
             </span>
           ) : (
-            <span
-              className="flex h-6 w-9 items-center justify-center rounded text-[10px] font-extrabold tracking-tight"
-              style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
-            >
-              {bankBrand.mark}
-            </span>
+            <>
+              <span
+                className="flex h-6 w-9 items-center justify-center rounded text-[10px] font-extrabold tracking-tight"
+                style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
+              >
+                {bankBrand.mark}
+              </span>
+              {order.paymentBank}
+            </>
           )}
-          {order.paymentBank}
         </Row>
       )}
 
@@ -202,7 +215,13 @@ function PaymentInstructions({
   );
 }
 
-function HowToPay({ channel }: { channel: PaymentChannel | null }) {
+function HowToPay({
+  channel,
+  isSimulation,
+}: {
+  channel: PaymentChannel | null;
+  isSimulation: boolean;
+}) {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-foreground">Cara pembayaran</p>
@@ -236,8 +255,102 @@ function HowToPay({ channel }: { channel: PaymentChannel | null }) {
           <li>Pastikan nama rekening sama dengan nama di akun USDX.</li>
           <li>Transfer nominal persis seperti tertera.</li>
           <li>Saldo USDX masuk otomatis setelah pembayaran terkonfirmasi.</li>
-          <li>Mode simulasi — pembayaran tidak diproses ke bank sungguhan.</li>
+          {isSimulation && <li>Mode simulasi — pembayaran tidak diproses ke bank sungguhan.</li>}
         </ul>
+      </Accordion>
+    </div>
+  );
+}
+
+// Baris ringkas di dalam accordion (bukan <Row>: teksnya kecil & tak boleh menyaingi
+// konfirmasi pembayaran di atasnya).
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-0.5">
+      <span>{label}</span>
+      <span className="flex items-center gap-1.5 font-medium text-foreground">{children}</span>
+    </div>
+  );
+}
+
+// Rincian dari "Nilai pesanan" ke "Total yang dibayar" — dua angka itu tampil bersebelahan di
+// ringkasan dan selisihnya (biaya layanan PG, plus kode unik pada provider yang memakainya)
+// harus bisa ditelusuri, bukan bikin user menebak. Sisa dihitung dari selisih supaya baris-
+// barisnya selalu menjumlah ke total yang benar-benar ditagih.
+function FeeBreakdown({ order }: { order: MintOrderDetail }) {
+  const subtotal = Number(order.subtotalIdr);
+  const mintFee = Number(order.mintFeeIdr);
+  const pgFee = Number(order.pgFeeIdr ?? 0);
+  const total = Number(order.totalPayIdr);
+  if (![subtotal, mintFee, pgFee, total].every(Number.isFinite)) return null;
+  const residual = Math.round(total - subtotal - mintFee - pgFee);
+
+  return (
+    <Accordion title="Rincian biaya">
+      <DetailRow label="Nilai USDX">{formatIDR(subtotal)}</DetailRow>
+      <DetailRow label={`Biaya mint (${order.mintFeePct}%)`}>{formatIDR(mintFee)}</DetailRow>
+      <DetailRow label="Biaya layanan pembayaran">{formatIDR(pgFee)}</DetailRow>
+      {/* Provider yang memakai kode unik (BNI) menempelkannya ke total — tanpa baris ini
+          rincian tidak menjumlah ke angka yang benar-benar ditagih. */}
+      {residual !== 0 && <DetailRow label="Kode unik">{formatIDR(residual)}</DetailRow>}
+      <div className="mt-1 border-t border-border pt-1">
+        <DetailRow label="Total yang dibayar">{formatIDR(total)}</DetailRow>
+      </div>
+    </Accordion>
+  );
+}
+
+// Sudah dibayar, belum selesai on-chain (menunggu persetujuan multisig — bisa lama). Instruksi
+// transfer TIDAK boleh tetap dominan di sini: nomor VA + "Jumlah yang harus dibayar" membuat user
+// yang sudah transfer membaca tagihan yang sama dan berpotensi bayar dua kali. Nomor VA tetap
+// tersedia sebagai rujukan, tapi dilipat dan tanpa satu pun kalimat perintah bayar.
+function PaidState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: string) => void }) {
+  const paidAt = formatWibDateTime(order.paidAt);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 p-4 text-center">
+        <span className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success">
+          <CheckCircle2 className="size-6" />
+        </span>
+        <p className="text-sm font-semibold text-foreground">Pembayaran diterima</p>
+        {order.totalPayIdr && (
+          <p className="text-lg font-semibold text-foreground">
+            {formatIDR(Number(order.totalPayIdr))}
+          </p>
+        )}
+        {paidAt && <p className="text-xs text-muted-foreground">{paidAt}</p>}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Tidak perlu transfer lagi. Pesanan kamu sedang diproses.
+        </p>
+      </div>
+
+      <MintStatusTracker order={order} />
+
+      <Accordion title="Detail pembayaran">
+        {order.paymentChannel === "QRIS" ? (
+          <DetailRow label="Metode">QRIS</DetailRow>
+        ) : (
+          <>
+            <DetailRow label="Metode">
+              Virtual Account{order.paymentBank ? ` ${order.paymentBank}` : ""}
+            </DetailRow>
+            {order.virtualAccountNo && (
+              <DetailRow label="Nomor Virtual Account">
+                <span className="font-mono">{groupDigits(order.virtualAccountNo)}</span>
+                <button
+                  type="button"
+                  onClick={() => onCopy(order.virtualAccountNo!)}
+                  aria-label="Salin nomor Virtual Account"
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Copy className="size-3.5" />
+                </button>
+              </DetailRow>
+            )}
+          </>
+        )}
+        <DetailRow label="Nomor pesanan">{order.orderNumber}</DetailRow>
+        {paidAt && <DetailRow label="Waktu pembayaran">{paidAt}</DetailRow>}
       </Accordion>
     </div>
   );
@@ -299,8 +412,19 @@ export function CheckoutContent() {
   // "Mint Berhasil" HANYA saat order COMPLETED DAN tx on-chain terbukti (onChainTxHash) —
   // PAID/WAITING_FOR_APPROVAL tetap tampil "sedang diproses" (USDX-293).
   const isCompleted = order?.status === "COMPLETED" && Boolean(order?.onChainTxHash);
+  // Sudah dibayar, on-chain belum tuntas → keadaan menengah (jangan tampilkan tagihan lagi).
+  const isPaid = order?.paymentStatus === "PAID" && !isCompleted;
+  // Countdown = sisa waktu BAYAR. Setelah lunas ia tak punya arti dan cuma bikin cemas.
   const showCountdown =
-    Boolean(order) && !isExpired && order!.status !== "COMPLETED" && order!.status !== "FAILED";
+    Boolean(order) &&
+    !isExpired &&
+    !isPaid &&
+    order!.status !== "COMPLETED" &&
+    order!.status !== "FAILED";
+  // Perbandingan ketat: field absen (backend lama) atau nilai tak dikenal → diperlakukan LIVE,
+  // banner simulasi TIDAK tampil. Salah tampil di dev cuma bikin bingung; salah tampil di prod
+  // memberi tahu user bahwa transfer sungguhannya tidak diproses.
+  const isSimulation = order?.paymentMode === "SIMULATION";
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col gap-4 px-4 py-8">
@@ -347,7 +471,16 @@ export function CheckoutContent() {
               <p className="text-xs text-muted-foreground">Pesanan #{order.orderNumber}</p>
             </div>
 
-            <Row label="Total Pembayaran">{formatIDR(Number(order.totalBeforePgFeeIdr))}</Row>
+            {/* Dua angka, dua nama berbeda: "Nilai pesanan" (sebelum biaya layanan PG) vs
+                "Total yang dibayar" (yang benar-benar ditagih). Dulu keduanya sama-sama disebut
+                "pembayaran" dengan angka berbeda — pemicu ragu tepat di layar bayar. */}
+            <Row label="Nilai pesanan">{formatIDR(Number(order.totalBeforePgFeeIdr))}</Row>
+            {order.totalPayIdr && (
+              <>
+                <Row label="Total yang dibayar">{formatIDR(Number(order.totalPayIdr))}</Row>
+                <FeeBreakdown order={order} />
+              </>
+            )}
             <div className="border-t border-border" />
             <Row label="Nama Lengkap">{order.customerName}</Row>
             <Row label="Wallet Tujuan">
@@ -384,16 +517,18 @@ export function CheckoutContent() {
               />
             ) : isCompleted ? (
               <SuccessState order={order} onBack={() => router.back()} />
+            ) : isPaid ? (
+              <PaidState order={order} onCopy={copy} />
             ) : (
               <div className="flex flex-col gap-4">
                 <PaymentInstructions order={order} onCopy={copy} />
-                <HowToPay channel={order.paymentChannel} />
+                <HowToPay channel={order.paymentChannel} isSimulation={isSimulation} />
                 <div className="border-t border-border" />
                 <MintStatusTracker order={order} />
               </div>
             )}
 
-            {!isCompleted && (
+            {isSimulation && !isCompleted && (
               <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
                 Mode simulasi: pembayaran tidak diproses ke bank sungguhan; status pesanan
                 diselesaikan otomatis oleh sistem (mock payment provider).
