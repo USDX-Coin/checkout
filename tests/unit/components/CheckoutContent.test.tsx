@@ -278,3 +278,143 @@ describe("logo bank tidak dobel dengan namanya", () => {
     });
   });
 });
+
+// ── Temuan verifikasi netral adversarial (Tugas 6, putaran 2) ────────────────────────────
+// Ketiganya satu keluarga: layar tak boleh menagih user yang uangnya sudah bergerak, atau yang
+// VA-nya sudah mati.
+
+describe("order mati: EXPIRED/FAILED dari backend tidak boleh menampilkan tagihan", () => {
+  // Expiry Handler backend menulis paymentStatus=EXPIRED DAN status=FAILED sekaligus
+  // (expiry-handler.repository.ts). Karena FAILED itu terminal, `isExpired` dari hook selalu
+  // false untuk kasus ini — dulu order jatuh ke cabang terakhir dan memasang tagihan lagi.
+  const MATI_BACKEND = makeOrder({ paymentStatus: "EXPIRED", status: "FAILED" });
+
+  describe("positive", () => {
+    test("EXPIRED+FAILED → layar kedaluwarsa, VA dinyatakan tak berlaku", () => {
+      renderWith(MATI_BACKEND, { isExpired: false });
+      expect(screen.getByText("Pesanan kedaluwarsa.")).toBeInTheDocument();
+      expect(screen.getByText(/sudah tidak berlaku/)).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("EXPIRED+FAILED → TIDAK ada nomor VA, tagihan, maupun perintah transfer", () => {
+      renderWith(MATI_BACKEND, { isExpired: false });
+      expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+      expect(screen.queryByText("8878 4716 9037 8849")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Transfer nominal/)).not.toBeInTheDocument();
+    });
+
+    test("FAILED tanpa EXPIRED (gagal sebab lain, uang belum masuk) → 'Transaksi gagal', bukan tagihan", () => {
+      renderWith(makeOrder({ paymentStatus: "WAITING_FOR_PAYMENT", status: "FAILED" }), {
+        isExpired: false,
+      });
+      expect(screen.getByText("Transaksi gagal.")).toBeInTheDocument();
+      expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+    });
+
+    test("countdown tidak tampil untuk order mati", () => {
+      renderWith(MATI_BACKEND, { isExpired: false });
+      expect(screen.queryByText(/Pembayaran berakhir dalam/)).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("PAID + FAILED tidak boleh menjanjikan 'sedang diproses'", () => {
+  const BAYAR_LALU_GAGAL = makeOrder({
+    ...SUDAH_BAYAR,
+    status: "FAILED",
+    safeStatus: "REJECTED",
+  });
+
+  describe("positive", () => {
+    test("uang tetap diakui diterima (jangan bikin user kira uangnya hangus)", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.getByText("Pembayaran diterima")).toBeInTheDocument();
+      expect(screen.getByText(/Transaksi gagal/)).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("TIDAK bilang 'sedang diproses' tepat di atas banner gagal", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.queryByText(/sedang diproses/)).not.toBeInTheDocument();
+    });
+
+    test("tetap tanpa tagihan", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("HELD: uang sudah masuk tapi ditahan untuk ditinjau", () => {
+  // paymentStatus HELD reachable lewat DurianPay (durianpay-notif.repository.ts) — nominal tak
+  // cocok / telat / dobel. Populasi paling rawan transfer ulang, jadi tagihan wajib hilang.
+  const DITAHAN = makeOrder({
+    paymentStatus: "HELD",
+    status: "HELD",
+    paidAt: "2026-08-13T14:03:44Z",
+  });
+
+  describe("positive", () => {
+    test("tampil 'Pembayaran sedang ditinjau' + larangan transfer ulang", () => {
+      renderWith(DITAHAN);
+      expect(screen.getByText("Pembayaran sedang ditinjau")).toBeInTheDocument();
+      expect(screen.getByText(/Jangan transfer lagi/)).toBeInTheDocument();
+    });
+
+    test("detail pembayaran tetap bisa dirujuk", () => {
+      renderWith(DITAHAN);
+      expect(screen.getByText("Detail pembayaran")).toBeInTheDocument();
+      expect(screen.getByText("8878 4716 9037 8849")).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("TIDAK menampilkan tagihan / perintah transfer / countdown", () => {
+      renderWith(DITAHAN);
+      expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Transfer nominal/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Pembayaran berakhir dalam/)).not.toBeInTheDocument();
+    });
+
+    test("TIDAK mengaku 'Pembayaran diterima' — nominalnya justru belum cocok", () => {
+      renderWith(DITAHAN);
+      expect(screen.queryByText("Pembayaran diterima")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("mode demo harus mengaku palsu", () => {
+  describe("positive", () => {
+    test("isDemoOverride → blok konfirmasi diberi label DEMO", () => {
+      renderWith(SUDAH_BAYAR, { isDemoOverride: true });
+      expect(screen.getByText(/DEMO — PEMBAYARAN TIDAK NYATA/)).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("pembayaran sungguhan tidak diberi label DEMO", () => {
+      renderWith(SUDAH_BAYAR);
+      expect(screen.queryByText(/DEMO/)).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("rincian biaya tidak salah melabeli", () => {
+  describe("edge cases", () => {
+    test("pgFeeIdr null → baris biaya layanan disembunyikan, sisanya BUKAN dilabeli 'Kode unik'", () => {
+      renderWith(makeOrder({ pgFeeIdr: null, totalPayIdr: "166500" }));
+      expect(screen.queryByText("Biaya layanan pembayaran")).not.toBeInTheDocument();
+      expect(screen.queryByText("Kode unik")).not.toBeInTheDocument();
+      expect(screen.getByText("Penyesuaian")).toBeInTheDocument();
+    });
+
+    test("sisa negatif → label netral, bukan 'Kode unik' yang mustahil negatif", () => {
+      renderWith(makeOrder({ totalPayIdr: "166000", pgFeeIdr: "4000" }));
+      expect(screen.queryByText("Kode unik")).not.toBeInTheDocument();
+      expect(screen.getByText("Penyesuaian")).toBeInTheDocument();
+    });
+  });
+});

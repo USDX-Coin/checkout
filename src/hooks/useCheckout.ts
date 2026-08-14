@@ -171,8 +171,15 @@ export function useCheckout(id: string) {
     },
   });
 
+  // Apakah `order` yang dikembalikan sedang DIPALSUKAN mode demo. Wajib diteruskan ke UI:
+  // demo memaksa paymentStatus=PAID tanpa satu rupiah pun berpindah, dan layar "Pembayaran
+  // diterima" tak bisa dibedakan dari yang sungguhan. Justru berbahaya di dev — di situ UAT
+  // DurianPay sandbox dijalankan.
+  const isDemoOverride = env.demoAutocomplete && demoPaid && fetched !== null;
+
   return {
     order,
+    isDemoOverride,
     // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan).
     isLoading: waitingForExchange || query.isLoading,
     isError: query.isError,

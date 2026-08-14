@@ -24,13 +24,23 @@ export type AmountCurrency = "USD" | "IDR";
 export type ConsumerOrderType = "MINT" | "REDEEM";
 
 // 3 dimensi status order mint (conventions.md § Status Enums → Mint Order).
-export type MintPaymentStatus = "REQUESTED" | "WAITING_FOR_PAYMENT" | "PAID" | "EXPIRED";
+// HELD = transfer sudah masuk tapi tak bisa dicocokkan otomatis (nominal kurang/lebih, telat,
+// atau dobel) dan ditahan untuk ditinjau ops. Ada di SoT (common.yaml) & enum DB sejak USDX-349,
+// tapi dulu tak dikenal checkout — akibatnya order HELD jatuh ke layar tagihan, padahal justru
+// populasi itu yang paling rawan transfer dua kali.
+export type MintPaymentStatus =
+  | "REQUESTED"
+  | "WAITING_FOR_PAYMENT"
+  | "PAID"
+  | "EXPIRED"
+  | "HELD";
 export type MintSafeStatus = "NONE" | "PENDING_APPROVAL" | "APPROVED" | "EXECUTED" | "REJECTED";
 export type MintOrderStatus =
   | "WAITING_FOR_PAYMENT"
   | "WAITING_FOR_APPROVAL"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "HELD"; // cermin denormalisasi dari paymentStatus HELD
 
 // Satu channel pembayaran yang ditawarkan (VA bawa daftar bank; QRIS tidak).
 export interface MintChannelOption {

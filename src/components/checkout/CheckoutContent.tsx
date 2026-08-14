@@ -16,7 +16,7 @@
 
 import { useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, ChevronDown, Copy, Download, Loader2, QrCode } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock, Copy, Download, Loader2, QrCode } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "sonner";
 import { useCheckout } from "@/hooks/useCheckout";
@@ -280,19 +280,30 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 function FeeBreakdown({ order }: { order: MintOrderDetail }) {
   const subtotal = Number(order.subtotalIdr);
   const mintFee = Number(order.mintFeeIdr);
-  const pgFee = Number(order.pgFeeIdr ?? 0);
   const total = Number(order.totalPayIdr);
-  if (![subtotal, mintFee, pgFee, total].every(Number.isFinite)) return null;
+  // pgFeeIdr null = biaya layanannya BELUM diketahui, bukan nol. Menampilkannya sebagai "Rp 0"
+  // lalu melempar selisihnya ke baris "Kode unik" akan salah melabeli biaya PG — lebih baik
+  // barisnya tidak ditampilkan sama sekali dan sisanya diberi label netral.
+  const pgFeeKnown = order.pgFeeIdr !== null && Number.isFinite(Number(order.pgFeeIdr));
+  const pgFee = pgFeeKnown ? Number(order.pgFeeIdr) : 0;
+  if (![subtotal, mintFee, total].every(Number.isFinite)) return null;
   const residual = Math.round(total - subtotal - mintFee - pgFee);
 
   return (
     <Accordion title="Rincian biaya">
       <DetailRow label="Nilai USDX">{formatIDR(subtotal)}</DetailRow>
       <DetailRow label={`Biaya mint (${order.mintFeePct}%)`}>{formatIDR(mintFee)}</DetailRow>
-      <DetailRow label="Biaya layanan pembayaran">{formatIDR(pgFee)}</DetailRow>
+      {pgFeeKnown && (
+        <DetailRow label="Biaya layanan pembayaran">{formatIDR(pgFee)}</DetailRow>
+      )}
       {/* Provider yang memakai kode unik (BNI) menempelkannya ke total — tanpa baris ini
-          rincian tidak menjumlah ke angka yang benar-benar ditagih. */}
-      {residual !== 0 && <DetailRow label="Kode unik">{formatIDR(residual)}</DetailRow>}
+          rincian tidak menjumlah ke angka yang benar-benar ditagih. Sisa NEGATIF mustahil
+          sebagai kode unik, jadi labelnya netral: kami tak mengarang sebabnya. */}
+      {residual !== 0 && (
+        <DetailRow label={pgFeeKnown && residual > 0 ? "Kode unik" : "Penyesuaian"}>
+          {formatIDR(residual)}
+        </DetailRow>
+      )}
       <div className="mt-1 border-t border-border pt-1">
         <DetailRow label="Total yang dibayar">{formatIDR(total)}</DetailRow>
       </div>
@@ -304,14 +315,76 @@ function FeeBreakdown({ order }: { order: MintOrderDetail }) {
 // transfer TIDAK boleh tetap dominan di sini: nomor VA + "Jumlah yang harus dibayar" membuat user
 // yang sudah transfer membaca tagihan yang sama dan berpotensi bayar dua kali. Nomor VA tetap
 // tersedia sebagai rujukan, tapi dilipat dan tanpa satu pun kalimat perintah bayar.
-function PaidState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: string) => void }) {
+// Rujukan pasca-bayar — dilipat, tanpa satu pun kalimat perintah bayar. Dipakai bersama oleh
+// keadaan "diterima" dan "ditinjau".
+function PaymentDetails({
+  order,
+  onCopy,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+}) {
   const paidAt = formatWibDateTime(order.paidAt);
+  return (
+    <Accordion title="Detail pembayaran">
+      {order.paymentChannel === "QRIS" ? (
+        <DetailRow label="Metode">QRIS</DetailRow>
+      ) : (
+        // paymentChannel bisa null pada data lama/aneh — jangan mengarang "Virtual Account".
+        <>
+          {order.paymentChannel === "VA" && (
+            <DetailRow label="Metode">
+              Virtual Account{order.paymentBank ? ` ${order.paymentBank}` : ""}
+            </DetailRow>
+          )}
+          {order.virtualAccountNo && (
+            <DetailRow label="Nomor Virtual Account">
+              <span className="font-mono">{groupDigits(order.virtualAccountNo)}</span>
+              <button
+                type="button"
+                onClick={() => onCopy(order.virtualAccountNo!)}
+                aria-label="Salin nomor Virtual Account"
+                className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </DetailRow>
+          )}
+        </>
+      )}
+      <DetailRow label="Nomor pesanan">{order.orderNumber}</DetailRow>
+      {paidAt && <DetailRow label="Waktu pembayaran">{paidAt}</DetailRow>}
+    </Accordion>
+  );
+}
+
+function PaidState({
+  order,
+  onCopy,
+  isDemo,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+  isDemo: boolean;
+}) {
+  const paidAt = formatWibDateTime(order.paidAt);
+  // Mint bisa gagal SETELAH uang masuk (multisig REJECTED). Kalau itu terjadi, tracker di bawah
+  // sudah bilang "Transaksi gagal" — janji "sedang diproses" di atasnya jadi bertentangan.
+  const failed = order.status === "FAILED";
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 p-4 text-center">
         <span className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success">
           <CheckCircle2 className="size-6" />
         </span>
+        {/* Demo memalsukan paymentStatus=PAID tanpa uang berpindah (useCheckout). Tanpa label ini
+            layarnya tak bisa dibedakan dari pembayaran sungguhan — berbahaya justru di dev, tempat
+            UAT DurianPay sandbox dijalankan. */}
+        {isDemo && (
+          <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-warning">
+            DEMO — PEMBAYARAN TIDAK NYATA
+          </span>
+        )}
         <p className="text-sm font-semibold text-foreground">Pembayaran diterima</p>
         {order.totalPayIdr && (
           <p className="text-lg font-semibold text-foreground">
@@ -320,38 +393,62 @@ function PaidState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: s
         )}
         {paidAt && <p className="text-xs text-muted-foreground">{paidAt}</p>}
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Tidak perlu transfer lagi. Pesanan kamu sedang diproses.
+          {failed
+            ? "Tidak perlu transfer lagi. Pembayaran kamu tercatat — lihat status di bawah."
+            : "Tidak perlu transfer lagi. Pesanan kamu sedang diproses."}
         </p>
       </div>
 
       <MintStatusTracker order={order} />
 
-      <Accordion title="Detail pembayaran">
-        {order.paymentChannel === "QRIS" ? (
-          <DetailRow label="Metode">QRIS</DetailRow>
-        ) : (
-          <>
-            <DetailRow label="Metode">
-              Virtual Account{order.paymentBank ? ` ${order.paymentBank}` : ""}
-            </DetailRow>
-            {order.virtualAccountNo && (
-              <DetailRow label="Nomor Virtual Account">
-                <span className="font-mono">{groupDigits(order.virtualAccountNo)}</span>
-                <button
-                  type="button"
-                  onClick={() => onCopy(order.virtualAccountNo!)}
-                  aria-label="Salin nomor Virtual Account"
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <Copy className="size-3.5" />
-                </button>
-              </DetailRow>
-            )}
-          </>
-        )}
-        <DetailRow label="Nomor pesanan">{order.orderNumber}</DetailRow>
-        {paidAt && <DetailRow label="Waktu pembayaran">{paidAt}</DetailRow>}
-      </Accordion>
+      <PaymentDetails order={order} onCopy={onCopy} />
+    </div>
+  );
+}
+
+// paymentStatus HELD — transfer SUDAH masuk tapi tak bisa dicocokkan otomatis (nominal kurang/
+// lebih, telat, atau dobel; sot/bni-integration.md §6). Ini justru populasi paling rawan transfer
+// ulang, jadi tagihan wajib hilang. Alasan penahanan (held_reason) tidak dikirim ke FE, jadi
+// teksnya sengaja tidak menebak-nebak sebabnya.
+function HeldState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: string) => void }) {
+  const paidAt = formatWibDateTime(order.paidAt);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 p-4 text-center">
+        <span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning">
+          <Clock className="size-6" />
+        </span>
+        <p className="text-sm font-semibold text-foreground">Pembayaran sedang ditinjau</p>
+        {paidAt && <p className="text-xs text-muted-foreground">{paidAt}</p>}
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Transfer kamu sudah kami terima, tapi belum cocok otomatis dengan pesanan ini. Tim kami
+          sedang memeriksanya. <span className="font-semibold">Jangan transfer lagi</span> — hubungi
+          dukungan kalau butuh bantuan.
+        </p>
+      </div>
+
+      <PaymentDetails order={order} onCopy={onCopy} />
+    </div>
+  );
+}
+
+// Order sudah mati sebelum uang masuk: jendela bayar habis, atau backend menutupnya. VA-nya tak
+// berlaku lagi — layar ini menggantikan tagihan supaya tak ada yang transfer ke nomor mati.
+function DeadState({ order, onBack }: { order: MintOrderDetail; onBack: () => void }) {
+  // Dua sebab yang bisa dibedakan user: kehabisan waktu bayar, atau order digagalkan backend
+  // karena hal lain. paymentStatus EXPIRED = sebab pertama; timer klien yang habis juga (status
+  // di backend belum sempat berubah).
+  const gagalBukanKedaluwarsa = order.status === "FAILED" && order.paymentStatus !== "EXPIRED";
+  return (
+    <div className="flex flex-col items-center gap-3 py-4 text-center">
+      <p className="text-sm font-medium text-destructive">
+        {gagalBukanKedaluwarsa ? "Transaksi gagal." : "Pesanan kedaluwarsa."}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Nomor Virtual Account pesanan ini sudah tidak berlaku. Mulai pesanan baru dari aplikasi
+        USDX.
+      </p>
+      <BackButton onClick={onBack} />
     </div>
   );
 }
@@ -401,8 +498,18 @@ export function CheckoutContent() {
   const router = useRouter();
   const params = useParams<{ orderId: string }>();
   const id = params.orderId;
-  const { order, isLoading, isError, isUnauthorized, pay, isPaying, payError, secondsLeft, isExpired } =
-    useCheckout(id);
+  const {
+    order,
+    isDemoOverride,
+    isLoading,
+    isError,
+    isUnauthorized,
+    pay,
+    isPaying,
+    payError,
+    secondsLeft,
+    isExpired,
+  } = useCheckout(id);
 
   function copy(text: string) {
     navigator.clipboard?.writeText(text);
@@ -412,15 +519,16 @@ export function CheckoutContent() {
   // "Mint Berhasil" HANYA saat order COMPLETED DAN tx on-chain terbukti (onChainTxHash) —
   // PAID/WAITING_FOR_APPROVAL tetap tampil "sedang diproses" (USDX-293).
   const isCompleted = order?.status === "COMPLETED" && Boolean(order?.onChainTxHash);
-  // Sudah dibayar, on-chain belum tuntas → keadaan menengah (jangan tampilkan tagihan lagi).
-  const isPaid = order?.paymentStatus === "PAID" && !isCompleted;
-  // Countdown = sisa waktu BAYAR. Setelah lunas ia tak punya arti dan cuma bikin cemas.
-  const showCountdown =
-    Boolean(order) &&
-    !isExpired &&
-    !isPaid &&
-    order!.status !== "COMPLETED" &&
-    order!.status !== "FAILED";
+  // Uang user SUDAH bergerak. PAID = cocok; HELD = masuk tapi ditahan untuk ditinjau (nominal
+  // tak cocok / telat / dobel). Dua-duanya haram menampilkan tagihan lagi — justru populasi HELD
+  // yang paling rawan transfer ulang.
+  const moneyIn = order?.paymentStatus === "PAID" || order?.paymentStatus === "HELD";
+  // Order sudah mati: timer klien habis, ATAU backend menutupnya (Expiry Handler menulis
+  // paymentStatus=EXPIRED + status=FAILED sekaligus, jadi `isExpired` yang di-guard !isTerminal
+  // tak pernah menyala untuk kasus itu). VA-nya tak berlaku lagi — jangan tampilkan tagihan.
+  const isDead = Boolean(order) && (isExpired || order!.status === "FAILED" || order!.paymentStatus === "EXPIRED");
+  // Countdown = sisa waktu BAYAR. Setelah uang masuk / order mati ia tak punya arti.
+  const showCountdown = Boolean(order) && !moneyIn && !isDead && order!.status !== "COMPLETED";
   // Perbandingan ketat: field absen (backend lama) atau nilai tak dikenal → diperlakukan LIVE,
   // banner simulasi TIDAK tampil. Salah tampil di dev cuma bikin bingung; salah tampil di prod
   // memberi tahu user bahwa transfer sungguhannya tidak diproses.
@@ -499,11 +607,21 @@ export function CheckoutContent() {
 
             <div className="border-t border-border" />
 
-            {isExpired ? (
-              <div className="flex flex-col items-center gap-3 py-4 text-center">
-                <p className="text-sm font-medium text-destructive">Pesanan kedaluwarsa.</p>
-                <BackButton onClick={() => router.back()} />
-              </div>
+            {/* Urutan cabang mengikuti "di mana uangnya", bukan sekadar enum: sudah selesai →
+                uang sudah masuk → order mati → belum pilih metode → sisanya menunggu bayar.
+                `moneyIn` sengaja MENDAHULUI `isDead`: order PAID yang mint-nya gagal tetap harus
+                menampilkan bahwa uangnya diterima (trackernya yang bilang gagal), bukan
+                "Pesanan kedaluwarsa" yang bikin user mengira uangnya hangus. */}
+            {isCompleted ? (
+              <SuccessState order={order} onBack={() => router.back()} />
+            ) : moneyIn ? (
+              order.paymentStatus === "HELD" ? (
+                <HeldState order={order} onCopy={copy} />
+              ) : (
+                <PaidState order={order} onCopy={copy} isDemo={isDemoOverride} />
+              )
+            ) : isDead ? (
+              <DeadState order={order} onBack={() => router.back()} />
             ) : order.paymentStatus === "REQUESTED" ? (
               <PaymentMethodSelector
                 channels={resolveChannels(order)}
@@ -515,10 +633,6 @@ export function CheckoutContent() {
                 }}
                 onCancel={() => router.back()}
               />
-            ) : isCompleted ? (
-              <SuccessState order={order} onBack={() => router.back()} />
-            ) : isPaid ? (
-              <PaidState order={order} onCopy={copy} />
             ) : (
               <div className="flex flex-col gap-4">
                 <PaymentInstructions order={order} onCopy={copy} />
