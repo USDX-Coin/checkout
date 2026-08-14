@@ -10,12 +10,18 @@
 // pakai token itu sebagai bearer. Code invalid/kedaluwarsa/terpakai (401) → sesi tak valid
 // → redirect balik ke `app`. Refresh dalam tab pakai token tersimpan (sessionStorage).
 //
-// DEMO mode (env.demoAutocomplete, dev/preview only): simulasikan HANYA konfirmasi
-// pembayaran (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval")
-// supaya demo lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak
-// W4 pipeline Safe real (Auto-Propose → sign → execute) jalan di dev; "on-chain berhasil"
-// HANYA dari backend real (status=COMPLETED + onChainTxHash). Override TAMPILAN saja; OFF di
-// prod (USDX-293: dulu demo maju paksa ke COMPLETED → user dikira sudah mint padahal belum).
+// DEMO mode (env.demoAutocomplete): simulasikan HANYA konfirmasi pembayaran
+// (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval") supaya demo
+// lokal lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak W4
+// pipeline Safe real (Auto-Propose → sign → execute) jalan di dev; "on-chain berhasil"
+// HANYA dari backend real (status=COMPLETED + onChainTxHash). Override TAMPILAN saja.
+// Dua pagar, keduanya di kode (bukan disiplin env):
+//  1. MATI di production — `env.demoAutocomplete` baru bernilai true kalau backend yang
+//     dituju terbukti non-prod (lihat `@/lib/env`). Env sendirian tidak cukup.
+//  2. HANYA MAJU — simulasi tak pernah menahan keadaan nyata yang sudah lebih maju. Begitu
+//     backend bilang COMPLETED/EXECUTED/HELD/EXPIRED, yang nyata yang tampil (lihat
+//     `demoMayAdvance`). Dulu override mengunci `status` selamanya, jadi order yang sudah
+//     selesai on-chain tetap terlihat "Proses on-chain" sampai halaman di-refresh.
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +36,67 @@ import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 const POLL_MS = 3000; // jauh di bawah throttle 5 req/detik (conventions.md § Rate Limiting)
 const DEMO_STEP_MS = 4000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
+
+// Satu-satunya keadaan yang boleh dikarang mode demo: "sudah dibayar, menunggu approval".
+const DEMO_TARGET = {
+  paymentStatus: "PAID",
+  status: "WAITING_FOR_APPROVAL",
+  safeStatus: "PENDING_APPROVAL",
+} as const;
+
+// Tipe sengaja `number | undefined`: nilai enum di luar daftar (backend lebih baru dari FE)
+// HARUS terbaca sebagai "tak dikenal", bukan diam-diam jadi rank 0 yang gampang ditimpa demo.
+type RankMap = Record<string, number | undefined>;
+
+// Urutan kemajuan tiap dimensi status (conventions.md § Status Enums → Mint Order). Dipakai
+// HANYA untuk memastikan simulasi demo tak pernah menahan keadaan nyata yang sudah lebih
+// maju. Keadaan akhir (HELD/EXPIRED/COMPLETED/FAILED/EXECUTED/REJECTED) diberi rank
+// tertinggi — bukan berarti "lebih sukses", tapi "lebih jauh dari yang boleh dikarang demo":
+// mengecat "Pembayaran diterima" di atas order yang ditahan, kedaluwarsa, atau gagal sama
+// bohongnya dengan menutupi order yang sudah selesai.
+const PAYMENT_RANK: RankMap = {
+  REQUESTED: 0,
+  WAITING_FOR_PAYMENT: 1,
+  PAID: 2,
+  HELD: 3,
+  EXPIRED: 3,
+};
+const ORDER_RANK: RankMap = {
+  WAITING_FOR_PAYMENT: 0,
+  WAITING_FOR_APPROVAL: 1,
+  HELD: 2,
+  COMPLETED: 3,
+  FAILED: 3,
+};
+const SAFE_RANK: RankMap = {
+  NONE: 0,
+  PENDING_APPROVAL: 1,
+  APPROVED: 2,
+  EXECUTED: 3,
+  REJECTED: 3,
+};
+
+// Selisih rank simulasi − nyata. `null` = salah satu nilainya tak dikenal (drift enum dari
+// backend) → penelepon WAJIB membacanya sebagai "jangan timpa" (fail-closed).
+function rankDelta(map: RankMap, sim: string, real: string): number | null {
+  const s = map[sim];
+  const r = map[real];
+  return s === undefined || r === undefined ? null : s - r;
+}
+
+// Simulasi boleh dipakai hanya bila ia MEMAJUKAN tampilan: tidak tertinggal di satu dimensi
+// pun, dan benar-benar maju di minimal satu (kalau semua sama ia cuma menyalin keadaan nyata
+// — tak ada yang dipalsukan, jadi tak perlu dilabeli DEMO). Semua-atau-tidak sama sekali:
+// menggabung per-field bisa melahirkan kombinasi mustahil (mis. EXPIRED + menunggu approval).
+function demoMayAdvance(real: MintOrderDetail): boolean {
+  const deltas = [
+    rankDelta(PAYMENT_RANK, DEMO_TARGET.paymentStatus, real.paymentStatus),
+    rankDelta(ORDER_RANK, DEMO_TARGET.status, real.status),
+    rankDelta(SAFE_RANK, DEMO_TARGET.safeStatus, real.safeStatus),
+  ];
+  if (deltas.some((d) => d === null || d < 0)) return false;
+  return deltas.some((d) => d !== null && d > 0);
+}
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
 function payErrorMessage(error: unknown): string | null {
@@ -119,7 +186,7 @@ export function useCheckout(id: string) {
     if (isUnauthorized) redirectToApp();
   }, [isUnauthorized]);
 
-  // ── DEMO: simulasi konfirmasi bayar saja (env-gated, dev/preview) ───────────
+  // ── DEMO: simulasi konfirmasi bayar saja (env + host non-prod) ──────────────
   // Setelah order ter-bayar (paymentStatus != REQUESTED), majukan TAMPILAN ke PAID /
   // "menunggu approval" lalu BERHENTI. Settlement on-chain (COMPLETED + onChainTxHash)
   // datang dari pipeline Safe real — demo tak lagi memalsukannya (USDX-293). Deps [paidish]
@@ -132,16 +199,23 @@ export function useCheckout(id: string) {
     return () => clearTimeout(t);
   }, [paidish]);
 
-  const order = useMemo<MintOrderDetail | null>(() => {
-    if (!fetched || !env.demoAutocomplete || !demoPaid) return fetched;
+  // Apakah `order` yang dikembalikan sedang DIPALSUKAN mode demo. Wajib diteruskan ke UI:
+  // demo memaksa paymentStatus=PAID tanpa satu rupiah pun berpindah, dan layar "Pembayaran
+  // diterima" tak bisa dibedakan dari yang sungguhan. Justru berbahaya di dev — di situ UAT
+  // DurianPay sandbox dijalankan.
+  //
+  // `demoMayAdvance` bikin override ini MUNDUR SENDIRI begitu backend melaporkan keadaan
+  // yang sama atau lebih maju (COMPLETED/EXECUTED, HELD, EXPIRED/FAILED). `demoPaid` tetap
+  // true, tapi ia tak lagi menimpa apa pun — hasil poll berikutnya langsung tampil, tanpa
+  // perlu refresh halaman.
+  const isDemoOverride =
+    env.demoAutocomplete && demoPaid && fetched !== null && demoMayAdvance(fetched);
+
+  const order = useMemo<MintOrderDetail | null>(
     // "Menunggu approval" per conventions.md § Status Enums → Mint Order.
-    return {
-      ...fetched,
-      paymentStatus: "PAID",
-      status: "WAITING_FOR_APPROVAL",
-      safeStatus: "PENDING_APPROVAL",
-    };
-  }, [fetched, demoPaid]);
+    () => (fetched && isDemoOverride ? { ...fetched, ...DEMO_TARGET } : fetched),
+    [fetched, isDemoOverride],
+  );
 
   // Tick 1 detik menggerakkan tampilan countdown.
   const [now, setNow] = useState(() => Date.now());
@@ -170,12 +244,6 @@ export function useCheckout(id: string) {
       queryClient.setQueryData(["mint-order", id], updated);
     },
   });
-
-  // Apakah `order` yang dikembalikan sedang DIPALSUKAN mode demo. Wajib diteruskan ke UI:
-  // demo memaksa paymentStatus=PAID tanpa satu rupiah pun berpindah, dan layar "Pembayaran
-  // diterima" tak bisa dibedakan dari yang sungguhan. Justru berbahaya di dev — di situ UAT
-  // DurianPay sandbox dijalankan.
-  const isDemoOverride = env.demoAutocomplete && demoPaid && fetched !== null;
 
   return {
     order,
