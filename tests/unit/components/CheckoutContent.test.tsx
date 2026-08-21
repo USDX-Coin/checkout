@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { MintOrderDetail } from "@/types";
 
 // Tugas 6 (catatan/TUGAS-6-PERBAIKI-CHECKOUT.md) — dua janji yang menyangkut uang user:
@@ -386,18 +386,22 @@ describe("HELD: uang sudah masuk tapi ditahan untuk ditinjau", () => {
   });
 });
 
-describe("mode demo harus mengaku palsu", () => {
-  describe("positive", () => {
-    test("isDemoOverride → blok konfirmasi diberi label DEMO", () => {
-      renderWith(SUDAH_BAYAR, { isDemoOverride: true });
-      expect(screen.getByText(/DEMO — PEMBAYARAN TIDAK NYATA/)).toBeInTheDocument();
-    });
-  });
-
+// Mode demo dihapus total: dulu ia memaksa "Pembayaran diterima" 4 detik setelah user pilih bank,
+// tanpa satu rupiah pun berpindah, dan nyala di dev & staging — persis tempat UAT DurianPay
+// sandbox dijalankan. Sekarang PAID hanya datang dari backend.
+describe("tidak ada lagi jalan memalsukan pembayaran", () => {
   describe("negative", () => {
-    test("pembayaran sungguhan tidak diberi label DEMO", () => {
+    test("layar sudah-bayar tak pernah menampilkan penanda demo", () => {
       renderWith(SUDAH_BAYAR);
-      expect(screen.queryByText(/DEMO/)).not.toBeInTheDocument();
+      // Sempit ke teks penandanya — `customerName` fixture kebetulan "Demo".
+      expect(screen.queryByText(/PEMBAYARAN TIDAK NYATA/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/simulasi/i)).not.toBeInTheDocument();
+    });
+
+    test("order yang backend bilang BELUM dibayar tetap menampilkan tagihan, bukan konfirmasi", () => {
+      renderWith(BELUM_BAYAR);
+      expect(screen.getByText(TAGIHAN)).toBeInTheDocument();
+      expect(screen.queryByText("Pembayaran diterima")).not.toBeInTheDocument();
     });
   });
 });
@@ -415,6 +419,85 @@ describe("rincian biaya tidak salah melabeli", () => {
       renderWith(makeOrder({ totalPayIdr: "166000", pgFeeIdr: "4000" }));
       expect(screen.queryByText("Kode unik")).not.toBeInTheDocument();
       expect(screen.getByText("Penyesuaian")).toBeInTheDocument();
+    });
+  });
+});
+
+// Setelah bayar, on-chain menunggu multisig dan bisa berjam-jam. Layarnya bilang "halaman ini
+// boleh ditutup" — tanpa tombol pulang, user disuruh pergi tanpa diberi jalan.
+describe("jalan pulang ke app setelah uang masuk", () => {
+  describe("positive", () => {
+    test("layar sudah-bayar punya tombol 'Kembali ke app' yang berfungsi", () => {
+      renderWith(SUDAH_BAYAR);
+      fireEvent.click(screen.getByRole("button", { name: "Kembali ke app" }));
+      expect(mockBack).toHaveBeenCalledTimes(1);
+    });
+
+    test("layar ditinjau (HELD) juga punya jalan pulang", () => {
+      renderWith(makeOrder({ paymentStatus: "HELD", status: "HELD", paidAt: "2026-08-13T14:03:44Z" }));
+      fireEvent.click(screen.getByRole("button", { name: "Kembali ke app" }));
+      expect(mockBack).toHaveBeenCalledTimes(1);
+    });
+
+    test("layar sukses tetap punya tombolnya (tak ada yang hilang)", () => {
+      renderWith(SELESAI);
+      expect(screen.getByRole("button", { name: "Kembali ke app" })).toBeInTheDocument();
+    });
+  });
+});
+
+// Metode bayar HANYA dari backend — ia yang tahu adapter aktif menerima apa. Dulu ada fallback
+// statis 9 bank + QRIS di checkout; di bawah DurianPay SNAP itu menawarkan 7 pilihan yang pasti
+// ditolak /pay.
+describe("metode bayar datang dari backend, bukan daftar tebakan", () => {
+  const VA_3_BANK = [
+    { channel: "VA" as const, pgFeeIdr: "4000.00", banks: ["BNI", "MANDIRI", "BRI"] as const },
+  ];
+
+  function belumPilihMetode(channels: unknown) {
+    return makeOrder({
+      paymentStatus: "REQUESTED",
+      paymentChannel: null,
+      paymentBank: null,
+      virtualAccountNo: null,
+      pgFeeIdr: null,
+      totalFeeIdr: null,
+      totalPayIdr: null,
+      channels: channels as never,
+    });
+  }
+
+  describe("positive", () => {
+    test("backend kirim VA 3 bank → yang tampil persis itu, QRIS tidak ada", () => {
+      renderWith(belumPilihMetode(VA_3_BANK));
+      expect(screen.getByText("Virtual Account")).toBeInTheDocument();
+      expect(screen.queryByText("QRIS")).not.toBeInTheDocument();
+    });
+
+    test("backend kirim VA + QRIS (mock) → dua-duanya tampil", () => {
+      renderWith(
+        belumPilihMetode([
+          { channel: "VA", pgFeeIdr: "4000.00", banks: ["BCA", "BNI"] },
+          { channel: "QRIS", pgFeeIdr: "11480.00", banks: null },
+        ]),
+      );
+      expect(screen.getByText("Virtual Account")).toBeInTheDocument();
+      expect(screen.getByText("QRIS")).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("channels kosong → suruh muat ulang, JANGAN tawarkan daftar tebakan", () => {
+      renderWith(belumPilihMetode([]));
+      expect(screen.getByText(/Metode pembayaran belum tersedia/)).toBeInTheDocument();
+      expect(screen.queryByText("QRIS")).not.toBeInTheDocument();
+      expect(screen.queryByText("Virtual Account")).not.toBeInTheDocument();
+    });
+
+    test("channels absen sama sekali (backend lama) → sama, tanpa daftar tebakan", () => {
+      renderWith(belumPilihMetode(undefined));
+      expect(screen.getByText(/Metode pembayaran belum tersedia/)).toBeInTheDocument();
+      expect(screen.queryByText("Virtual Account")).not.toBeInTheDocument();
     });
   });
 });

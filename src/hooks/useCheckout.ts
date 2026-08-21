@@ -10,25 +10,23 @@
 // pakai token itu sebagai bearer. Code invalid/kedaluwarsa/terpakai (401) → sesi tak valid
 // → redirect balik ke `app`. Refresh dalam tab pakai token tersimpan (sessionStorage).
 //
-// DEMO mode (env.demoAutocomplete, dev/preview only): simulasikan HANYA konfirmasi
-// pembayaran (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval")
-// supaya demo lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak
-// W4 pipeline Safe real (Auto-Propose → sign → execute) jalan di dev; "on-chain berhasil"
-// HANYA dari backend real (status=COMPLETED + onChainTxHash). Override TAMPILAN saja; OFF di
-// prod (USDX-293: dulu demo maju paksa ke COMPLETED → user dikira sudah mint padahal belum).
+// TIDAK ADA mode demo/simulasi di sini. Dulu ada `NEXT_PUBLIC_DEMO_AUTOCOMPLETE` yang memaksa
+// tampilan jadi "Pembayaran diterima" 4 detik setelah user pilih bank, tanpa satu rupiah pun
+// berpindah — dan itu nyala di dev & staging, persis lingkungan tempat UAT DurianPay sandbox
+// dijalankan, sehingga layar bukti pembayaran tak bisa dibedakan dari yang sungguhan.
+// Alasannya sudah hilang: DurianPay SNAP sandbox jalan di dev dan punya simulator bayar
+// sendiri, jadi PAID yang sungguhan bisa dipicu tanpa memalsukan apa pun.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { exchangeHandoffCode } from "@/lib/api/auth";
 import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
 import { readHandoffCodeFromHash, getToken, setToken } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
-import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
 const POLL_MS = 3000; // jauh di bawah throttle 5 req/detik (conventions.md § Rate Limiting)
-const DEMO_STEP_MS = 4000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
@@ -119,29 +117,8 @@ export function useCheckout(id: string) {
     if (isUnauthorized) redirectToApp();
   }, [isUnauthorized]);
 
-  // ── DEMO: simulasi konfirmasi bayar saja (env-gated, dev/preview) ───────────
-  // Setelah order ter-bayar (paymentStatus != REQUESTED), majukan TAMPILAN ke PAID /
-  // "menunggu approval" lalu BERHENTI. Settlement on-chain (COMPLETED + onChainTxHash)
-  // datang dari pipeline Safe real — demo tak lagi memalsukannya (USDX-293). Deps [paidish]
-  // stabil `true` setelah bayar → timer aman dari cleanup tiap poll.
-  const [demoPaid, setDemoPaid] = useState(false);
-  const paidish = fetched !== null && fetched.paymentStatus !== "REQUESTED";
-  useEffect(() => {
-    if (!env.demoAutocomplete || !paidish) return;
-    const t = setTimeout(() => setDemoPaid(true), DEMO_STEP_MS);
-    return () => clearTimeout(t);
-  }, [paidish]);
-
-  const order = useMemo<MintOrderDetail | null>(() => {
-    if (!fetched || !env.demoAutocomplete || !demoPaid) return fetched;
-    // "Menunggu approval" per conventions.md § Status Enums → Mint Order.
-    return {
-      ...fetched,
-      paymentStatus: "PAID",
-      status: "WAITING_FOR_APPROVAL",
-      safeStatus: "PENDING_APPROVAL",
-    };
-  }, [fetched, demoPaid]);
+  // Tak ada lagi lapisan simulasi di sini: apa yang tampil = apa yang dikatakan backend.
+  const order = fetched;
 
   // Tick 1 detik menggerakkan tampilan countdown.
   const [now, setNow] = useState(() => Date.now());
@@ -171,15 +148,8 @@ export function useCheckout(id: string) {
     },
   });
 
-  // Apakah `order` yang dikembalikan sedang DIPALSUKAN mode demo. Wajib diteruskan ke UI:
-  // demo memaksa paymentStatus=PAID tanpa satu rupiah pun berpindah, dan layar "Pembayaran
-  // diterima" tak bisa dibedakan dari yang sungguhan. Justru berbahaya di dev — di situ UAT
-  // DurianPay sandbox dijalankan.
-  const isDemoOverride = env.demoAutocomplete && demoPaid && fetched !== null;
-
   return {
     order,
-    isDemoOverride,
     // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan).
     isLoading: waitingForExchange || query.isLoading,
     isError: query.isError,

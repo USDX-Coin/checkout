@@ -22,9 +22,9 @@ import { toast } from "sonner";
 import { useCheckout } from "@/hooks/useCheckout";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
-import { BANK_BRAND, QRIS_RED, VA_BANKS } from "@/lib/constants";
+import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
 import { formatIDR, formatCountdown, formatWibDateTime, truncateAddress } from "@/lib/utils";
-import type { MintChannelOption, MintOrderDetail, PaymentChannel, VaBank } from "@/types";
+import type { MintChannelOption, MintOrderDetail, PaymentChannel } from "@/types";
 
 // Kelompokkan digit per 4 biar nomor VA gampang dibaca (8878 4716 9037 8849).
 function groupDigits(s: string): string {
@@ -36,13 +36,11 @@ function txExplorerUrl(chain: string, hash: string): string | null {
   return chain === "polygon" ? `https://polygonscan.com/tx/${hash}` : null;
 }
 
-// GET bisa tak menyertakan channels[] (backend lama) — fallback ke daftar statis.
+// Metode bayar HANYA dari backend — ia yang tahu adapter aktif menerima apa. Dulu ada fallback
+// daftar statis 9 bank + QRIS di sini; di bawah DurianPay SNAP (VA BNI/MANDIRI/BRI saja) itu
+// menawarkan 7 pilihan yang pasti ditolak. Daftar kosong → suruh muat ulang, jangan menebak.
 function resolveChannels(order: MintOrderDetail): MintChannelOption[] {
-  if (order.channels && order.channels.length) return order.channels;
-  return [
-    { channel: "VA", pgFeeIdr: "", banks: [...VA_BANKS] as VaBank[] },
-    { channel: "QRIS", pgFeeIdr: "", banks: null },
-  ];
+  return order.channels ?? [];
 }
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -361,11 +359,11 @@ function PaymentDetails({
 function PaidState({
   order,
   onCopy,
-  isDemo,
+  onBack,
 }: {
   order: MintOrderDetail;
   onCopy: (text: string) => void;
-  isDemo: boolean;
+  onBack: () => void;
 }) {
   const paidAt = formatWibDateTime(order.paidAt);
   // Mint bisa gagal SETELAH uang masuk (multisig REJECTED). Kalau itu terjadi, tracker di bawah
@@ -377,14 +375,6 @@ function PaidState({
         <span className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success">
           <CheckCircle2 className="size-6" />
         </span>
-        {/* Demo memalsukan paymentStatus=PAID tanpa uang berpindah (useCheckout). Tanpa label ini
-            layarnya tak bisa dibedakan dari pembayaran sungguhan — berbahaya justru di dev, tempat
-            UAT DurianPay sandbox dijalankan. */}
-        {isDemo && (
-          <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-warning">
-            DEMO — PEMBAYARAN TIDAK NYATA
-          </span>
-        )}
         <p className="text-sm font-semibold text-foreground">Pembayaran diterima</p>
         {order.totalPayIdr && (
           <p className="text-lg font-semibold text-foreground">
@@ -402,6 +392,17 @@ function PaidState({
       <MintStatusTracker order={order} />
 
       <PaymentDetails order={order} onCopy={onCopy} />
+
+      {/* Layar ini bilang "halaman boleh ditutup" — tanpa tombol ini user disuruh pulang tanpa
+          diberi jalan pulang. Proses on-chain menunggu multisig dan bisa berjam-jam, jadi tempat
+          menunggunya di app (yang punya notifikasi), bukan di tab checkout yang dibiarkan terbuka. */}
+      <button
+        type="button"
+        onClick={onBack}
+        className="brand-gradient flex h-[42px] items-center justify-center rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
+      >
+        Kembali ke app
+      </button>
     </div>
   );
 }
@@ -410,7 +411,15 @@ function PaidState({
 // lebih, telat, atau dobel; sot/bni-integration.md §6). Ini justru populasi paling rawan transfer
 // ulang, jadi tagihan wajib hilang. Alasan penahanan (held_reason) tidak dikirim ke FE, jadi
 // teksnya sengaja tidak menebak-nebak sebabnya.
-function HeldState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: string) => void }) {
+function HeldState({
+  order,
+  onCopy,
+  onBack,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+  onBack: () => void;
+}) {
   const paidAt = formatWibDateTime(order.paidAt);
   return (
     <div className="flex flex-col gap-4">
@@ -428,6 +437,8 @@ function HeldState({ order, onCopy }: { order: MintOrderDetail; onCopy: (text: s
       </div>
 
       <PaymentDetails order={order} onCopy={onCopy} />
+
+      <BackButton onClick={onBack} label="Kembali ke app" />
     </div>
   );
 }
@@ -500,7 +511,6 @@ export function CheckoutContent() {
   const id = params.orderId;
   const {
     order,
-    isDemoOverride,
     isLoading,
     isError,
     isUnauthorized,
@@ -616,12 +626,19 @@ export function CheckoutContent() {
               <SuccessState order={order} onBack={() => router.back()} />
             ) : moneyIn ? (
               order.paymentStatus === "HELD" ? (
-                <HeldState order={order} onCopy={copy} />
+                <HeldState order={order} onCopy={copy} onBack={() => router.back()} />
               ) : (
-                <PaidState order={order} onCopy={copy} isDemo={isDemoOverride} />
+                <PaidState order={order} onCopy={copy} onBack={() => router.back()} />
               )
             ) : isDead ? (
               <DeadState order={order} onBack={() => router.back()} />
+            ) : order.paymentStatus === "REQUESTED" && resolveChannels(order).length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Metode pembayaran belum tersedia. Muat ulang halaman ini sebentar lagi.
+                </p>
+                <BackButton onClick={() => router.back()} />
+              </div>
             ) : order.paymentStatus === "REQUESTED" ? (
               <PaymentMethodSelector
                 channels={resolveChannels(order)}
