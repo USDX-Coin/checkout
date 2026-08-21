@@ -65,11 +65,14 @@ describe("MintStatusTracker", () => {
 
   describe("negative", () => {
     test("PAID + WAITING_FOR_APPROVAL (txHash kosong) → on-chain masih diproses, Selesai pending", () => {
-      const { container } = render(<MintStatusTracker order={makeOrder()} />);
-      // Pembayaran sudah beres, on-chain masih berjalan (spinner), Selesai belum.
+      render(<MintStatusTracker order={makeOrder()} />);
+      // Pembayaran beres, on-chain berjalan, Selesai belum. "Berjalan" diukur dari langkahnya
+      // aktif + keterangannya tampil — BUKAN dari spinner: langkah ini sengaja tak beranimasi
+      // supaya user tak mengira halaman ini harus ditunggui.
       expect(isPending("Pembayaran")).toBe(false);
+      expect(isPending("Proses on-chain")).toBe(false);
       expect(isPending("Selesai")).toBe(true);
-      expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+      expect(screen.getByText(/menunggu persetujuan/)).toBeInTheDocument();
     });
 
     test("FAILED → tampil pesan gagal, bukan langkah sukses", () => {
@@ -86,7 +89,46 @@ describe("MintStatusTracker", () => {
       );
       // Belum ada bukti tx on-chain → on-chain tetap diproses, Selesai pending.
       expect(isPending("Selesai")).toBe(true);
-      expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+      expect(isPending("Proses on-chain")).toBe(false);
+      // Tak ada animasi di langkah ini (lihat blok spinner di bawah), jadi jangan diukur dari situ.
+      expect(container.querySelectorAll(".animate-spin")).toHaveLength(0);
+    });
+  });
+});
+
+// Rekaman uji 21 Agu: user melihat lingkaran berputar di "Proses on-chain" tepat di sebelah
+// kalimat "halaman ini boleh ditutup". Spinner itu konvensi "tunggu sebentar lagi" dan mata orang
+// lebih percaya spinner daripada teks — jadi halaman yang tak perlu ditunggui, ditunggui.
+describe("spinner hanya untuk langkah yang memang ditunggui di halaman ini", () => {
+  const spinners = (c: HTMLElement) => c.querySelectorAll(".animate-spin");
+
+  describe("positive", () => {
+    test("menunggu pembayaran → langkah Pembayaran BERPUTAR (user memang menunggu di sini)", () => {
+      const { container } = render(
+        <MintStatusTracker order={makeOrder({ paymentStatus: "WAITING_FOR_PAYMENT" })} />,
+      );
+      expect(spinners(container)).toHaveLength(1);
+    });
+  });
+
+  describe("negative", () => {
+    test("sudah bayar, menunggu multisig → TIDAK ADA yang berputar sama sekali", () => {
+      const { container } = render(<MintStatusTracker order={makeOrder()} />);
+      // Langkahnya tetap aktif & keterangannya tetap tampil — yang hilang cuma animasinya.
+      expect(spinners(container)).toHaveLength(0);
+      expect(screen.getByText(/halaman ini boleh ditutup/)).toBeInTheDocument();
+      expect(isPending("Proses on-chain")).toBe(false);
+    });
+  });
+
+  describe("edge cases", () => {
+    test("COMPLETED → tetap tanpa animasi", () => {
+      const { container } = render(
+        <MintStatusTracker
+          order={makeOrder({ status: "COMPLETED", safeStatus: "EXECUTED", onChainTxHash: "0xd" })}
+        />,
+      );
+      expect(spinners(container)).toHaveLength(0);
     });
   });
 });

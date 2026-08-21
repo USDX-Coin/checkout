@@ -20,6 +20,7 @@ import { CheckCircle2, ChevronDown, Clock, Copy, Download, Loader2, QrCode } fro
 import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "sonner";
 import { useCheckout } from "@/hooks/useCheckout";
+import { returnToApp } from "@/lib/auth/redirect";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
@@ -526,6 +527,14 @@ export function CheckoutContent() {
     toast.success("Disalin");
   }
 
+  // Keluar dari checkout setelah pesanan tak lagi menunggu tindakan user. Navigasi PENUH ke app
+  // (lihat returnToApp) — `router.back()` memulihkan tab app apa adanya, termasuk modal
+  // "Ringkasan Transaksi" yang masih terbuka, sehingga user yang sudah bayar disodori tombol
+  // "Lanjut Pembayaran" lagi. `router.back()` disisakan untuk lingkungan tanpa NEXT_PUBLIC_APP_URL.
+  function backToApp() {
+    if (!returnToApp()) router.back();
+  }
+
   // "Mint Berhasil" HANYA saat order COMPLETED DAN tx on-chain terbukti (onChainTxHash) —
   // PAID/WAITING_FOR_APPROVAL tetap tampil "sedang diproses" (USDX-293).
   const isCompleted = order?.status === "COMPLETED" && Boolean(order?.onChainTxHash);
@@ -623,15 +632,15 @@ export function CheckoutContent() {
                 menampilkan bahwa uangnya diterima (trackernya yang bilang gagal), bukan
                 "Pesanan kedaluwarsa" yang bikin user mengira uangnya hangus. */}
             {isCompleted ? (
-              <SuccessState order={order} onBack={() => router.back()} />
+              <SuccessState order={order} onBack={backToApp} />
             ) : moneyIn ? (
               order.paymentStatus === "HELD" ? (
-                <HeldState order={order} onCopy={copy} onBack={() => router.back()} />
+                <HeldState order={order} onCopy={copy} onBack={backToApp} />
               ) : (
-                <PaidState order={order} onCopy={copy} onBack={() => router.back()} />
+                <PaidState order={order} onCopy={copy} onBack={backToApp} />
               )
             ) : isDead ? (
-              <DeadState order={order} onBack={() => router.back()} />
+              <DeadState order={order} onBack={backToApp} />
             ) : order.paymentStatus === "REQUESTED" && resolveChannels(order).length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-4 text-center">
                 <p className="text-sm text-muted-foreground">

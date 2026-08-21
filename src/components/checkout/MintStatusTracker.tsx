@@ -4,22 +4,29 @@
 // Selesai, diturunkan dari paymentStatus + status overall order (conventions.md § Status
 // Enums). Di-poll checkout via GET /v2/mint/{id}.
 
-import { Check, Loader2, X } from "lucide-react";
+import { Check, Clock, Loader2, X } from "lucide-react";
 import type { MintOrderDetail } from "@/types";
 import { cn } from "@/lib/utils";
 
 // `activeHint` tampil HANYA saat langkahnya berjalan. "Proses on-chain" praktiknya = menunggu
-// tanda tangan multisig Safe — bisa menit, bisa jam, tergantung penandatangan. Tanpa keterangan,
-// user cuma melihat lingkaran berputar dan mengira halaman ini harus ditunggui. Sengaja TANPA
+// tanda tangan multisig Safe — bisa menit, bisa jam, tergantung penandatangan. Sengaja TANPA
 // estimasi waktu: kita tak menguasai kapan penandatangan membuka antrean.
-const STEPS: { label: string; activeHint: string | null }[] = [
-  { label: "Pembayaran", activeHint: null },
+//
+// `spinWhenActive` memisahkan dua jenis "sedang berjalan" yang rasanya beda buat user:
+//  - Pembayaran → SPINNER. User memang duduk di halaman ini menunggu transfernya terdeteksi;
+//    lingkaran berputar itu jujur, dan berhentinya jadi penanda.
+//  - Proses on-chain → JAM DIAM. Spinner di sini berbohong: ia berkata "tunggu sebentar lagi"
+//    tepat di sebelah kalimat "halaman ini boleh ditutup", dan mata orang lebih percaya
+//    spinner daripada teks — jadi user menunggui halaman yang tak perlu ditunggui.
+const STEPS: { label: string; activeHint: string | null; spinWhenActive: boolean }[] = [
+  { label: "Pembayaran", activeHint: null, spinWhenActive: true },
   {
     label: "Proses on-chain",
     activeHint:
       "Pesanan sedang diproses & menunggu persetujuan. Token akan otomatis masuk ke wallet setelah selesai — halaman ini boleh ditutup.",
+    spinWhenActive: false,
   },
-  { label: "Selesai", activeHint: null },
+  { label: "Selesai", activeHint: null, spinWhenActive: true },
 ];
 
 type StepState = "done" | "active" | "pending";
@@ -37,7 +44,7 @@ function stepStates(order: MintOrderDetail): StepState[] {
   ];
 }
 
-function StepIcon({ state }: { state: StepState }) {
+function StepIcon({ state, spin }: { state: StepState; spin: boolean }) {
   if (state === "done")
     return (
       <span className="flex size-6 items-center justify-center rounded-full bg-primary text-white">
@@ -47,7 +54,7 @@ function StepIcon({ state }: { state: StepState }) {
   if (state === "active")
     return (
       <span className="flex size-6 items-center justify-center rounded-full border border-primary text-primary">
-        <Loader2 className="size-3.5 animate-spin" />
+        {spin ? <Loader2 className="size-3.5 animate-spin" /> : <Clock className="size-3.5" />}
       </span>
     );
   return (
@@ -69,9 +76,9 @@ export function MintStatusTracker({ order }: { order: MintOrderDetail }) {
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-foreground">Status transaksi</p>
       <ol className="flex flex-col gap-2.5">
-        {STEPS.map(({ label, activeHint }, i) => (
+        {STEPS.map(({ label, activeHint, spinWhenActive }, i) => (
           <li key={label} className="flex items-start gap-2.5">
-            <StepIcon state={states[i]} />
+            <StepIcon state={states[i]} spin={spinWhenActive} />
             <div className="flex flex-col gap-0.5 pt-0.5">
               <span
                 className={cn(

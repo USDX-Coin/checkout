@@ -16,6 +16,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ back: mockBack, push: vi.fn(), replace: vi.fn() }),
 }));
 
+vi.mock("@/lib/auth/redirect", () => ({ returnToApp: () => mockReturnToApp() }));
+const mockReturnToApp = vi.fn(() => true);
+
 const mockUseCheckout = vi.fn();
 vi.mock("@/hooks/useCheckout", () => ({ useCheckout: (id: string) => mockUseCheckout(id) }));
 
@@ -101,6 +104,8 @@ const TAGIHAN = /Jumlah yang harus dibayar/;
 beforeEach(() => {
   mockUseCheckout.mockReset();
   mockBack.mockReset();
+  mockReturnToApp.mockReset();
+  mockReturnToApp.mockReturnValue(true);
 });
 
 describe("banner mode simulasi (Tugas 6 poin 1)", () => {
@@ -430,13 +435,14 @@ describe("jalan pulang ke app setelah uang masuk", () => {
     test("layar sudah-bayar punya tombol 'Kembali ke app' yang berfungsi", () => {
       renderWith(SUDAH_BAYAR);
       fireEvent.click(screen.getByRole("button", { name: "Kembali ke app" }));
-      expect(mockBack).toHaveBeenCalledTimes(1);
+      // Keluarnya lewat navigasi penuh, bukan router.back() — lihat blok "keluar dari checkout".
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
     });
 
     test("layar ditinjau (HELD) juga punya jalan pulang", () => {
       renderWith(makeOrder({ paymentStatus: "HELD", status: "HELD", paidAt: "2026-08-13T14:03:44Z" }));
       fireEvent.click(screen.getByRole("button", { name: "Kembali ke app" }));
-      expect(mockBack).toHaveBeenCalledTimes(1);
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
     });
 
     test("layar sukses tetap punya tombolnya (tak ada yang hilang)", () => {
@@ -498,6 +504,52 @@ describe("metode bayar datang dari backend, bukan daftar tebakan", () => {
       renderWith(belumPilihMetode(undefined));
       expect(screen.getByText(/Metode pembayaran belum tersedia/)).toBeInTheDocument();
       expect(screen.queryByText("Virtual Account")).not.toBeInTheDocument();
+    });
+  });
+});
+
+// Rekaman uji 21 Agu: setelah "Kembali ke app", tab app dipulihkan APA ADANYA — modal "Ringkasan
+// Transaksi" masih terbuka lengkap dengan tombol "Lanjut Pembayaran", untuk pesanan yang uangnya
+// SUDAH masuk. Penyebabnya `router.back()` (mundur di riwayat browser). Keluar dari checkout harus
+// navigasi PENUH supaya app dimuat ulang dan modal lamanya hilang.
+describe("keluar dari checkout memuat app dari awal, bukan mundur di riwayat", () => {
+  const keluarDari = (order: MintOrderDetail, over: Record<string, unknown> = {}) => {
+    renderWith(order, over);
+    fireEvent.click(screen.getByRole("button", { name: /Kembali/ }));
+  };
+
+  describe("positive", () => {
+    test("sudah bayar → navigasi penuh ke app, TIDAK memakai router.back()", () => {
+      keluarDari(SUDAH_BAYAR);
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    test("selesai → sama", () => {
+      keluarDari(SELESAI);
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    test("ditahan (HELD) → sama", () => {
+      keluarDari(makeOrder({ paymentStatus: "HELD", status: "HELD" }));
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+
+    test("kedaluwarsa → sama (modal 'Lanjut Pembayaran' juga tak boleh hidup lagi di sini)", () => {
+      keluarDari(makeOrder({ paymentStatus: "EXPIRED", status: "FAILED" }), { isExpired: false });
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
+      expect(mockBack).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("negative", () => {
+    test("NEXT_PUBLIC_APP_URL kosong (localhost) → fallback router.back(), tombol tetap berfungsi", () => {
+      mockReturnToApp.mockReturnValue(false);
+      keluarDari(SUDAH_BAYAR);
+      expect(mockReturnToApp).toHaveBeenCalledTimes(1);
+      expect(mockBack).toHaveBeenCalledTimes(1);
     });
   });
 });
