@@ -11,13 +11,29 @@
 import { apiFetch } from "./client";
 import type { MintOrderDetail, PayMintOrderRequest } from "@/types";
 
-export async function getMintOrder(id: string): Promise<MintOrderDetail> {
-  return apiFetch<MintOrderDetail>(`/api/v2/mint/${id}`, { method: "GET" });
+// `bearer` OPSIONAL, dan tanpa argumen itu perilakunya PERSIS seperti sebelumnya: `apiFetch`
+// mengambil token sesi aplikasi dari `sessionStorage` sendiri. Argumen ini dipakai jalur partner
+// (USDX-548), yang kredensialnya hidup di slot terpisah (`@/lib/partner/session-store`) supaya
+// membuka tautan partner tidak menimpa sesi aplikasi di tab yang sama.
+function authHeaders(bearer?: string): { headers?: HeadersInit } {
+  return bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : {};
+}
+
+export async function getMintOrder(id: string, bearer?: string): Promise<MintOrderDetail> {
+  return apiFetch<MintOrderDetail>(`/api/v2/mint/${id}`, {
+    method: "GET",
+    ...authHeaders(bearer),
+  });
 }
 
 export async function payMintOrder(
   id: string,
   req: PayMintOrderRequest,
+  bearer?: string,
 ): Promise<MintOrderDetail> {
-  return apiFetch<MintOrderDetail>(`/api/v2/mint/${id}/pay`, { method: "POST", body: req });
+  return apiFetch<MintOrderDetail>(`/api/v2/mint/${id}/pay`, {
+    method: "POST",
+    body: req,
+    ...authHeaders(bearer),
+  });
 }

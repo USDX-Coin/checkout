@@ -156,3 +156,22 @@
     linear-gradient(90deg, var(--brand-from) 0%, var(--brand-from) 100%);
   box-shadow: 0 1px 2px 0 rgba(128, 0, 0, 0.4), 0 0 0 1px var(--brand-from);
 }
+
+/*
+ * Aksen halaman checkout partner (USDX-548, mengikuti Figma).
+ *
+ * Desain memakai teks kecil berwarna untuk hitungan mundur ("23 : 47") dan persentase kemajuan
+ * ("67%"). Satu warna tidak bisa melayani dua tema: yang terbaca di atas kartu putih tenggelam
+ * di atas kartu gelap. Jadi `PartnerShell` memasang DUA nilai — masing-masing sudah disesuaikan
+ * sampai lolos AA terhadap latar kartu temanya (lihat `accentTextPair` di lib/partner/brand.ts) —
+ * dan varian di bawah yang memilih mana yang dipakai.
+ *
+ * Warna brand partner sendiri (permukaan tombol) TIDAK ikut berbalik; itu memang disengaja, dan
+ * desainnya menyatakannya: "Warna partner tidak berubah antar mode, sama seperti warna merek USDX."
+ */
+.partner-scope {
+  --partner-accent-text: var(--partner-accent-on-light);
+}
+.dark .partner-scope {
+  --partner-accent-text: var(--partner-accent-on-dark);
+}
