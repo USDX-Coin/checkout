@@ -1,4 +1,4 @@
-// Pintu masuk jalur partner: `checkout.usdx.co.id/s/{token}` (USDX-548).
+// Pintu masuk jalur partner: `mint.usdx.co.id/s/{token}` (USDX-548 — host diputuskan Wisnu 27 Agu).
 //
 // Bentuk tautan datang dari kontrak partner (`sot/api/partner-mint.yaml` →
 // `PaymentRedirect.checkout_url`), jadi token mentah MEMANG lewat path URL — itu tak bisa

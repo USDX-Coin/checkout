@@ -3,7 +3,7 @@
 //
 // Kenapa ini bukan formalitas: tombol "kembali ke aplikasi partner" adalah navigasi yang
 // DILAKUKAN OLEH HALAMAN KAMI, dari domain kami, atas URL yang datang dari luar. Tanpa
-// pembatasan, `checkout.usdx.co.id` berubah jadi pengalih terbuka (open redirect) — alat yang
+// pembatasan, halaman checkout kami berubah jadi pengalih terbuka (open redirect) — alat yang
 // justru berharga untuk phishing karena domainnya terlihat sah. Jadi aturannya allowlist,
 // bukan blocklist: yang tidak terdaftar DITOLAK, tanpa kecuali.
 //

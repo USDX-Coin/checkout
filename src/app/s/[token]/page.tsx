@@ -1,7 +1,12 @@
-// Pintu masuk jalur partner: `checkout.usdx.co.id/s/{token}` (USDX-548).
+// Pintu masuk jalur partner: `mint.usdx.co.id/s/{token}` (USDX-548).
+//
+// HOST-nya keputusan Wisnu 27 Agu 2026: `mint.usdx.co.id`, host checkout yang sudah dipakai —
+// bukan subdomain baru. Draf awal kontrak menulis `checkout.usdx.co.id`, dan kontraknya yang
+// dibetulkan (sot#16), bukan infrastrukturnya. Konsekuensinya nol: tidak ada DNS, sertifikat,
+// atau entri `CORS_ORIGINS` baru yang dibutuhkan.
 //
 // Bentuk tautan ini adalah KONTRAK — `sot/api/partner-mint.yaml` → `PaymentRedirect.checkout_url`
-// ("https://checkout.usdx.co.id/s/9f2a1b3c4d"). Server component tipis; seluruh kerjanya
+// ("https://mint.usdx.co.id/s/9f2a1b3c4d"). Server component tipis; seluruh kerjanya
 // (buang token dari riwayat → resolve → pindah ke halaman pembayaran) ada di PartnerSessionEntry.
 
 import type { Metadata } from "next";

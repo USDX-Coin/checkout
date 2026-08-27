@@ -1,6 +1,6 @@
 // Jalur partner (USDX-548). Customer partner TIDAK punya aplikasi USDX dan TIDAK punya akun —
 // jadi jalur handoff `#code=` dari `app` (USDX-378) tak bisa dipakai sama sekali. Pintu masuknya
-// tautan ber-token: `checkout.usdx.co.id/s/{token}` (bentuknya dari kontrak partner,
+// tautan ber-token: `mint.usdx.co.id/s/{token}` (bentuknya dari kontrak partner,
 // `sot/api/partner-mint.yaml` → `PaymentRedirect.checkout_url`).
 //
 // Token itu KREDENSIAL: ia membuka halaman bayar tanpa login. Karena itu backend menyimpan
