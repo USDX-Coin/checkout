@@ -1,75 +1,127 @@
 "use client";
 
-// Layar akhir halaman partner (USDX-548) — dan ini bagian yang paling penting dari tiket ini.
+// Layar hasil — frame P04–P08 / N04–N08 di Figma, satu tata letak dengan isi berbeda.
 //
-// Begitu status masuk `WAITING_FOR_APPROVAL`, uang customer SUDAH diterima dan yang tersisa
-// adalah persetujuan multisig di sisi kami — keadaan TERLAMA dari kelimanya, "bisa berjam-jam"
-// (`src/hooks/useCheckout.ts:92`). Menahan customer di halaman ini sampai selesai berarti
-// menahan orang berjam-jam di tab milik pihak yang bahkan bukan penyedia layanan yang ia
-// percaya. Jadi: konfirmasi bahwa pembayarannya diterima, lalu LEPASKAN dia — dengan tombol,
-// bukan dengan menyuruhnya menutup tab sendiri.
+// Ini bagian paling penting dari tiket ini. Begitu status masuk `WAITING_FOR_APPROVAL`, uang
+// customer SUDAH diterima dan sisanya persetujuan multisig di sisi kami — keadaan TERLAMA dari
+// kelimanya, "bisa memakan waktu beberapa jam". Catatan desain untuk P04 menuliskannya sebagai
+// perubahan besar: "customer TIDAK ditahan di halaman ... jadi ada CTA kembali ke app".
 //
-// `return_url` yang dipakai di sini SUDAH lolos `safeReturnUrl` di pemanggil. Kalau tidak lolos,
+// `returnUrl` yang sampai ke sini SUDAH lolos `safeReturnUrl` di pemanggil. Kalau tidak lolos,
 // tombolnya TIDAK dirender — halaman ini tidak pernah menavigasi ke URL yang belum divalidasi,
 // karena persis itulah yang mengubahnya jadi pengalih terbuka.
 
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Clock, RefreshCw, XCircle } from "lucide-react";
 
-export type StatusTone = "success" | "review" | "failure";
+export type HeroTone = "success" | "review" | "failure";
 
-const TONE = {
-  success: { Icon: CheckCircle2, wrap: "bg-success/10", badge: "bg-success/15 text-success" },
-  review: { Icon: Clock, wrap: "bg-warning/10", badge: "bg-warning/15 text-warning" },
-  failure: { Icon: XCircle, wrap: "bg-destructive/10", badge: "bg-destructive/15 text-destructive" },
+const HERO = {
+  success: { Icon: CheckCircle2, className: "bg-success/10 text-success" },
+  review: { Icon: Clock, className: "bg-warning/15 text-warning" },
+  failure: { Icon: XCircle, className: "bg-destructive/10 text-destructive" },
 } as const;
 
 interface PartnerStatusScreenProps {
-  tone: StatusTone;
+  tone: HeroTone;
   heading: string;
-  body: string;
-  /** Sudah tervalidasi terhadap daftar terdaftar. `null` = tak ada jalan keluar yang boleh diklik. */
+  /** Nominal besar di bawah judul (mis. "60,606060 USDX"). */
+  amount?: string | null;
+  /** Kalimat penjelas di bawah judul/nominal. */
+  subtitle?: string | null;
+  /** Isi tambahan: stepper, baris rincian, banner. */
+  children?: React.ReactNode;
+  /** Sudah tervalidasi. `null` = tak ada jalan keluar yang boleh diklik. */
   returnUrl: string | null;
   returnCta: string;
   noReturnUrlNote: string;
-  /** Baris tambahan opsional (mis. nominal + waktu bayar). */
-  children?: React.ReactNode;
+  /** Tombol sekunder (mis. "Buat pesanan baru", "Coba lagi"). */
+  secondary?: { label: string; onClick: () => void; icon?: "refresh" } | null;
+  /** Tombol utama non-navigasi (P08 "Coba lagi" adalah aksi, bukan tautan). */
+  primaryAction?: { label: string; onClick: () => void } | null;
 }
 
 export function PartnerStatusScreen({
   tone,
   heading,
-  body,
+  amount,
+  subtitle,
+  children,
   returnUrl,
   returnCta,
   noReturnUrlNote,
-  children,
+  secondary,
+  primaryAction,
 }: PartnerStatusScreenProps) {
-  const { Icon, wrap, badge } = TONE[tone];
+  const { Icon, className } = HERO[tone];
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className={`flex flex-col items-center gap-2 rounded-xl p-5 text-center ${wrap}`}>
-        <span className={`flex size-11 items-center justify-center rounded-full ${badge}`}>
-          <Icon className="size-6" />
+    <>
+      <div className="flex flex-col items-center gap-2 pt-2 text-center">
+        <span className={`flex size-14 items-center justify-center rounded-full ${className}`}>
+          <Icon className="size-7" />
         </span>
-        <p className="text-base font-semibold text-foreground">{heading}</p>
-        {children}
-        <p className="text-xs leading-relaxed text-muted-foreground">{body}</p>
+        <h2 className="text-xl font-bold tracking-tight text-foreground">{heading}</h2>
+        {amount && <p className="text-2xl font-bold text-foreground">{amount}</p>}
+        {subtitle && (
+          <p className="text-xs leading-relaxed text-muted-foreground">{subtitle}</p>
+        )}
       </div>
 
-      {returnUrl ? (
-        // Navigasi tingkat atas ke domain partner — memang lintas-origin, memang meninggalkan
-        // halaman kami. Itu tujuannya.
-        <a
-          href={returnUrl}
-          data-testid="partner-return-link"
-          style={{ backgroundColor: "var(--partner-brand)", color: "var(--partner-brand-text)" }}
-          className="flex h-[44px] w-full items-center justify-center rounded-lg border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90"
-        >
-          {returnCta}
-        </a>
-      ) : (
-        <p className="text-center text-xs text-muted-foreground">{noReturnUrlNote}</p>
-      )}
-    </div>
+      {children}
+
+      <div className="mt-auto flex flex-col gap-2.5 pt-4">
+        {primaryAction && (
+          <button
+            type="button"
+            onClick={primaryAction.onClick}
+            style={{
+              backgroundColor: "var(--partner-brand)",
+              color: "var(--partner-brand-text)",
+            }}
+            className="flex h-12 w-full items-center justify-center rounded-xl border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90"
+          >
+            {primaryAction.label}
+          </button>
+        )}
+
+        {returnUrl ? (
+          // Navigasi tingkat atas ke domain partner — memang lintas-origin, memang meninggalkan
+          // halaman kami. Itu tujuannya.
+          <a
+            href={returnUrl}
+            data-testid="partner-return-link"
+            style={
+              primaryAction
+                ? undefined
+                : {
+                    backgroundColor: "var(--partner-brand)",
+                    color: "var(--partner-brand-text)",
+                  }
+            }
+            className={
+              primaryAction
+                ? "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                : "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90"
+            }
+          >
+            {returnCta}
+            {!primaryAction && <ArrowRight className="size-4" />}
+          </a>
+        ) : (
+          <p className="text-center text-xs text-muted-foreground">{noReturnUrlNote}</p>
+        )}
+
+        {secondary && (
+          <button
+            type="button"
+            onClick={secondary.onClick}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            {secondary.icon === "refresh" && <RefreshCw className="size-4" />}
+            {secondary.label}
+          </button>
+        )}
+      </div>
+    </>
   );
 }

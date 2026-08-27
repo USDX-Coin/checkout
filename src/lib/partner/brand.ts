@@ -133,3 +133,70 @@ export function resolveBrand(
 
   return { primary, primaryText: readableTextOn(primary), accent };
 }
+
+// ── WARNA AKSEN UNTUK TEKS (USDX-548, mengikuti Figma) ───────────────────────────────────────
+// Desain memakai aksen berwarna untuk teks kecil: hitungan mundur ("23 : 47") dan persentase
+// kemajuan ("67%"). Teks kecil berwarna adalah tempat paling mudah gagal AA, dan di sini ia
+// gagal di ARAH YANG BERBEDA per tema: biru pekat terbaca di atas kartu putih tapi tenggelam di
+// atas kartu gelap, dan sebaliknya.
+//
+// Karena itu aksen teks bukan satu warna, melainkan SEPASANG — satu untuk tema terang, satu
+// untuk tema gelap — masing-masing hasil penyesuaian sampai lolos AA terhadap latar kartunya.
+// Pemasangannya lewat dua custom property yang ditukar oleh varian `.dark` di `globals.css`,
+// bukan lewat satu nilai yang dipaksa melayani dua tema.
+
+/** Latar kartu per tema — harus sama dengan `--card` di `globals.css`. */
+export const CARD_BACKGROUND = { light: "#ffffff", dark: "#1a1a1a" } as const;
+
+function toRgb(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ];
+}
+
+function toHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((c) => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Campur `hex` menuju `target` sebanyak `amount` (0..1). */
+function mix(hex: string, target: "#000000" | "#ffffff", amount: number): string {
+  const [r, g, b] = toRgb(hex);
+  const t = target === "#000000" ? 0 : 255;
+  return toHex([r + (t - r) * amount, g + (t - g) * amount, b + (t - b) * amount]);
+}
+
+/**
+ * Geser `color` (menggelap untuk latar terang, menerang untuk latar gelap) sampai kontrasnya
+ * terhadap `background` mencapai AA. Kalau sampai batas pun tak tercapai, kembalikan warna
+ * teks tema apa adanya — lebih baik kehilangan aksen daripada kehilangan keterbacaan.
+ */
+function adjustForBackground(color: string, background: string, fallback: string): string {
+  if (contrastRatio(color, background) >= AA_CONTRAST) return color;
+  const towards = relativeLuminance(background) > 0.5 ? "#000000" : "#ffffff";
+  for (let step = 1; step <= 20; step++) {
+    const candidate = mix(color, towards, step / 20);
+    if (contrastRatio(candidate, background) >= AA_CONTRAST) return candidate;
+  }
+  return fallback;
+}
+
+export interface AccentTextPair {
+  /** Dipakai saat tema terang (latar kartu putih). */
+  onLight: string;
+  /** Dipakai saat tema gelap (latar kartu `#1a1a1a`). */
+  onDark: string;
+}
+
+/**
+ * Warna aksen → sepasang warna teks yang dijamin lolos AA di tema masing-masing.
+ * Warna tak sah → pasangan dari fallback netral.
+ */
+export function accentTextPair(accent: string | null | undefined): AccentTextPair {
+  const hex = normalizeHex(accent) ?? NEUTRAL_FALLBACK_ACCENT;
+  return {
+    onLight: adjustForBackground(hex, CARD_BACKGROUND.light, "#1a1a1a"),
+    onDark: adjustForBackground(hex, CARD_BACKGROUND.dark, "#fafafa"),
+  };
+}

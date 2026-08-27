@@ -1,6 +1,8 @@
 import { describe, test, expect } from "vitest";
 import {
   AA_CONTRAST,
+  CARD_BACKGROUND,
+  accentTextPair,
   NEUTRAL_FALLBACK_ACCENT,
   NEUTRAL_FALLBACK_PRIMARY,
   contrastRatio,
@@ -216,6 +218,68 @@ describe("resolveBrand", () => {
     test("fallback netral BUKAN warna brand USDX", () => {
       expect([NEUTRAL_FALLBACK_PRIMARY, NEUTRAL_FALLBACK_ACCENT]).not.toContain("#800000");
       expect([NEUTRAL_FALLBACK_PRIMARY, NEUTRAL_FALLBACK_ACCENT]).not.toContain("#f7a100");
+    });
+  });
+});
+
+// ── Aksen teks per tema (USDX-548, mengikuti Figma) ──────────────────────────────────────────
+// Desain memakai aksen berwarna untuk hitungan mundur dan persentase. Teks kecil berwarna gagal
+// AA di ARAH BERBEDA per tema, jadi aksennya sepasang — dan pasangan itu yang diuji di sini.
+
+describe("accentTextPair", () => {
+  describe("positive", () => {
+    test("emas USDX → dua varian, dua-duanya lolos AA di latar kartunya", () => {
+      const pair = accentTextPair("#f7a100");
+      expect(contrastRatio(pair.onLight, CARD_BACKGROUND.light)).toBeGreaterThanOrEqual(AA_CONTRAST);
+      expect(contrastRatio(pair.onDark, CARD_BACKGROUND.dark)).toBeGreaterThanOrEqual(AA_CONTRAST);
+    });
+
+    test("aksen apa pun tetap lolos AA di kedua tema", () => {
+      for (const candidate of [
+        "#f7a100",
+        "#2563eb",
+        "#ffffff",
+        "#000000",
+        "#f7e600",
+        "#767676",
+        "bukan-warna",
+        null,
+      ]) {
+        const pair = accentTextPair(candidate);
+        expect(
+          contrastRatio(pair.onLight, CARD_BACKGROUND.light),
+          `onLight ${pair.onLight} dari ${String(candidate)}`,
+        ).toBeGreaterThanOrEqual(AA_CONTRAST);
+        expect(
+          contrastRatio(pair.onDark, CARD_BACKGROUND.dark),
+          `onDark ${pair.onDark} dari ${String(candidate)}`,
+        ).toBeGreaterThanOrEqual(AA_CONTRAST);
+      }
+    });
+  });
+
+  describe("negative", () => {
+    test("emas mentah GAGAL di latar terang — itu sebabnya penyesuaian ini ada", () => {
+      // Kalau emas apa adanya sudah lolos, seluruh mekanisme ini tak perlu. Ia tidak lolos.
+      expect(contrastRatio("#f7a100", CARD_BACKGROUND.light)).toBeLessThan(AA_CONTRAST);
+      expect(accentTextPair("#f7a100").onLight).not.toBe("#f7a100");
+    });
+
+    test("dua varian TIDAK sama untuk warna yang butuh penyesuaian dua arah", () => {
+      const pair = accentTextPair("#2563eb");
+      expect(pair.onLight).not.toBe(pair.onDark);
+    });
+  });
+
+  describe("edge case", () => {
+    test("latar kartu kedua tema memang berbeda (bukan salah satu saja yang diuji)", () => {
+      expect(CARD_BACKGROUND.light).not.toBe(CARD_BACKGROUND.dark);
+    });
+
+    test("warna yang sudah lolos di satu tema dibiarkan apa adanya di tema itu", () => {
+      // Biru pekat sudah lolos di atas kartu putih → tak perlu digeser.
+      const pair = accentTextPair("#1e3a8a");
+      expect(pair.onLight).toBe("#1e3a8a");
     });
   });
 });
