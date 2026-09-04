@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/*
+ * Utility animasi Tailwind v4 (`animate-in`, `fade-in-0`, `zoom-in-95`,
+ * `slide-in-from-*`) yang dipakai komponen Radix di `components/ui/`.
+ * Sama seperti di repo `app`.
+ */
+@import "tw-animate-css";
 
 /* Dark mode driven by a `.dark` class on <html> (next-themes attribute="class") */
 @custom-variant dark (&:where(.dark, .dark *));
