@@ -11,6 +11,7 @@
 // paling umum menghasilkan elemen yang benar di Light dan tak terbaca di Dark.
 
 import { AlertTriangle, CheckCircle2, Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function PartnerCard({
@@ -157,16 +158,18 @@ export function PartnerCopyValue({
         >
           {display}
         </span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => onCopy(value)}
           disabled={!value}
           style={{ color: "var(--partner-accent-text)" }}
-          className="flex shrink-0 items-center gap-1 text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-40"
+          className="font-semibold"
         >
-          <Copy className="size-4" />
+          <Copy />
           {copyLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -177,7 +180,7 @@ export function PartnerStatusPill({ tone, children }: { tone: "error" | "success
   return (
     <span
       className={cn(
-        "rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide",
+        "rounded px-1.5 py-0.5 text-xs font-bold tracking-wide",
         tone === "error"
           ? "bg-destructive/10 text-destructive"
           : "bg-success/10 text-success",
@@ -207,15 +210,24 @@ export function PartnerBrandButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    // `variant="brand"` SENGAJA TIDAK dipakai: varian itu maroon USDX, dan di presentasi netral
+    // ia menempelkan merek KAMI pada halaman partner. Yang diambil dari `ui/button` adalah yang
+    // memang universal — cincin fokus keyboard, transisi, dan perilaku disabled; warnanya tetap
+    // milik partner. `outline` jadi dasar netralnya, lalu ditimpa warna partner.
+    //
+    // Tinggi 48 dipertahankan (bukan 44 dari skala kontrol): ini tombol utama layar partner yang
+    // lebarnya penuh, dan mengubahnya sekarang menggeser tata letak yang tidak diminta berubah.
+    <Button
       type="button"
+      variant="outline"
+      size="lg"
       onClick={onClick}
       disabled={disabled}
       style={{ backgroundColor: "var(--partner-brand)", color: "var(--partner-brand-text)" }}
-      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
+      className="h-12 w-full rounded-xl border-foreground/15 font-semibold"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -229,13 +241,15 @@ export function PartnerGhostButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="lg"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+      className="h-12 w-full rounded-xl"
     >
       {children}
-    </button>
+    </Button>
   );
 }

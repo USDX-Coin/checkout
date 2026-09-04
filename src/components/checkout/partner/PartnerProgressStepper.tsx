@@ -96,9 +96,12 @@ export function PartnerProgressStepper({
 }
 
 function StepIcon({ state }: { state: StepState }) {
+  // Glif langkah selesai dilubangi dengan warna permukaan kartu, bukan putih: `--success` di tema gelap
+  // (#22c55e) terlalu terang untuk menampung centang putih (2,28:1). Sama dengan
+  // `MintStatusTracker`, supaya dua stepper di repo ini tidak berbeda diam-diam.
   if (state === "done") {
     return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-white">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-card">
         <Check className="size-3" strokeWidth={3} />
       </span>
     );
@@ -109,7 +112,10 @@ function StepIcon({ state }: { state: StepState }) {
         style={{ backgroundColor: "var(--partner-brand)" }}
         className="flex size-5 shrink-0 items-center justify-center rounded-full"
       >
-        <span className="size-1.5 rounded-full bg-white" />
+        {/* `--partner-brand-text`, bukan putih: titik ini duduk di atas warna merek
+            partner, dan partner yang mereknya terang membuat titik putih lenyap.
+            Token ini sudah dipasangkan dengan `--partner-brand` di PartnerShell. */}
+        <span className="size-1.5 rounded-full" style={{ backgroundColor: "var(--partner-brand-text)" }} />
       </span>
     );
   }

@@ -588,11 +588,23 @@ describe("QRIS tidak muncul sebagai pilihan di UI partner", () => {
   }
 
   describe("positive", () => {
-    test("tiga bank yang didukung muncul sebagai tombol", () => {
+    // Perannya `radio`, bukan `button`: memilih bank adalah pilihan EKSKLUSIF, dan sejak
+    // migrasi ke `ui/radio-group` pembaca layar mendengarnya begitu ("1 dari 3, terpilih")
+    // alih-alih tiga tombol yang seolah bisa menyala sendiri-sendiri.
+    test("tiga bank yang didukung muncul sebagai satu grup radio", () => {
       renderBankStep();
+      expect(screen.getByRole("radiogroup")).toBeInTheDocument();
       for (const bank of ["MANDIRI", "BNI", "BRI"]) {
-        expect(screen.getByRole("button", { name: bank })).toBeInTheDocument();
+        expect(screen.getByRole("radio", { name: bank })).toBeInTheDocument();
       }
+    });
+
+    test("memilih bank menandainya terpilih — dan hanya satu yang terpilih", () => {
+      renderBankStep();
+      fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
+      expect(screen.getByRole("radio", { name: "BNI" })).toBeChecked();
+      expect(screen.getByRole("radio", { name: "MANDIRI" })).not.toBeChecked();
+      expect(screen.getByRole("radio", { name: "BRI" })).not.toBeChecked();
     });
   });
 
@@ -605,7 +617,7 @@ describe("QRIS tidak muncul sebagai pilihan di UI partner", () => {
 
     test("bank di luar tiga yang didukung (BCA) tidak dirender", () => {
       renderBankStep();
-      expect(screen.queryByRole("button", { name: "BCA" })).toBeNull();
+      expect(screen.queryByRole("radio", { name: "BCA" })).toBeNull();
     });
 
     test("backend hanya menawarkan QRIS → tak ada pilihan, bukan tombol yang pasti gagal", () => {

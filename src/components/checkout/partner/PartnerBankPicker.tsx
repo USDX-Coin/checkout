@@ -9,9 +9,19 @@
 //
 // Daftar banknya tetap datang dari backend (`channels[]`) dan disaring `partnerChannels`; kalau
 // backend keliru menawarkan QRIS atau bank di luar tiga itu, ia tidak sampai ke sini.
+//
+// Pilihan banknya memakai `ui/radio-group` (Radix), bukan tombol `aria-pressed`. `aria-pressed`
+// menyatakan toggle yang bisa menyala sendiri-sendiri; ini pilihan EKSKLUSIF, dan pembaca layar
+// perlu mendengarnya begitu ("1 dari 3, terpilih"). Radix juga memberi navigasi panah dan satu
+// tab stop untuk seluruh grup. Ubinnya tetap seperti desain — logo di atas plat putih, tepi
+// warna partner saat terpilih — jadi radionya disembunyikan secara visual dan cincin fokus
+// dipindahkan ke ubin lewat `has-[...]`; kalau tidak, fokus keyboard mendarat di lingkaran yang
+// tak terlihat. Warna bawaan `RadioGroupItem` (maroon `--primary`) sengaja tak pernah terlihat:
+// di presentasi netral, maroon adalah merek KAMI yang bocor ke halaman partner.
 
 import { Landmark } from "lucide-react";
 import { BANK_BRAND } from "@/lib/constants";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { formatIDR, cn } from "@/lib/utils";
 import { formatSpacedCountdown } from "@/lib/partner/format";
 import type { PartnerCopy } from "@/lib/partner/copy";
@@ -71,23 +81,28 @@ export function PartnerBankPicker({
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <RadioGroup
+          value={selected ?? ""}
+          onValueChange={(v) => onSelect(v as VaBank)}
+          aria-label={copy.chooseBankHeading}
+          className="grid-cols-3 gap-2"
+        >
           {banks.map((bank) => {
             const brand = BANK_BRAND[bank];
             const active = selected === bank;
+            const id = `partner-bank-${bank}`;
             return (
-              <button
+              <label
                 key={bank}
-                type="button"
-                onClick={() => onSelect(bank)}
-                aria-pressed={active}
-                aria-label={bank}
+                htmlFor={id}
                 style={active ? { borderColor: "var(--partner-brand)" } : undefined}
                 className={cn(
-                  "flex h-14 items-center justify-center rounded-lg border-2 bg-white px-2 transition-colors",
+                  "flex h-14 cursor-pointer items-center justify-center rounded-lg border-2 bg-white px-2 transition-control",
+                  "has-[[data-slot=radio-group-item]:focus-visible]:ring-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-focus-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-background",
                   active ? "" : "border-border hover:border-foreground/30",
                 )}
               >
+                <RadioGroupItem value={bank} id={id} aria-label={bank} className="sr-only" />
                 {brand?.logo ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
@@ -96,14 +111,17 @@ export function PartnerBankPicker({
                     className="max-h-5 w-auto max-w-full object-contain"
                   />
                 ) : (
+                  // Warna literal DISENGAJA: platnya `bg-white` permanen di kedua tema (logo bank
+                  // dibuat untuk latar putih). Token teks akan berbalik jadi terang di tema gelap
+                  // dan lenyap di atas plat yang tidak ikut berbalik.
                   <span className="text-xs font-bold text-[#1a1a1a]">{bank}</span>
                 )}
-              </button>
+              </label>
             );
           })}
-        </div>
+        </RadioGroup>
 
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{copy.bankListNote}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{copy.bankListNote}</p>
       </PartnerCard>
 
       {total !== null && (
@@ -114,7 +132,7 @@ export function PartnerBankPicker({
       )}
 
       {payError && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive-text">
           {payError}
         </p>
       )}

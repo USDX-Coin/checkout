@@ -71,7 +71,10 @@ export function PartnerVaInstructions({
                   className="max-h-4 w-auto object-contain"
                 />
               ) : (
-                <span className="text-[11px] font-bold text-[#1a1a1a]">{order.paymentBank}</span>
+                // Warna literal DISENGAJA: platnya `bg-white` permanen di kedua tema (logo bank
+                // dibuat untuk latar putih). Token teks akan berbalik jadi terang di tema gelap
+                // dan lenyap di atas plat yang tidak ikut berbalik.
+                <span className="text-xs font-bold text-[#1a1a1a]">{order.paymentBank}</span>
               )}
             </span>
           )}

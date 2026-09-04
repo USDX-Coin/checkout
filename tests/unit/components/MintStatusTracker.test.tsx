@@ -75,10 +75,58 @@ describe("MintStatusTracker", () => {
       expect(screen.getByText(/menunggu persetujuan/)).toBeInTheDocument();
     });
 
-    test("FAILED → tampil pesan gagal, bukan langkah sukses", () => {
-      render(<MintStatusTracker order={makeOrder({ status: "FAILED", safeStatus: "REJECTED" })} />);
+    // Temuan audit B4 membelah keadaan FAILED jadi dua, karena artinya buat user memang beda:
+    // uang belum bergerak vs uang sudah bergerak. Yang kedua tidak boleh menyembunyikan bahwa
+    // langkah PEMBAYARAN-nya berhasil — itu justru satu-satunya kabar baik di layar itu.
+    test("FAILED sebelum uang masuk → pesan gagal datar, bukan langkah sukses", () => {
+      render(
+        <MintStatusTracker
+          order={makeOrder({
+            status: "FAILED",
+            safeStatus: "REJECTED",
+            paymentStatus: "WAITING_FOR_PAYMENT",
+          })}
+        />,
+      );
       expect(screen.getByText(/Transaksi gagal/)).toBeInTheDocument();
       expect(screen.queryByText("Selesai")).not.toBeInTheDocument();
+    });
+
+    test("FAILED SESUDAH uang masuk → Pembayaran selesai, langkah on-chain yang ditandai gagal", () => {
+      render(
+        <MintStatusTracker
+          order={makeOrder({ status: "FAILED", safeStatus: "REJECTED", paymentStatus: "PAID" })}
+        />,
+      );
+      expect(isPending("Pembayaran")).toBe(false);
+      expect(screen.getByText("Proses on-chain").className).toContain("text-destructive");
+      expect(screen.getByText(/Pengiriman dibatalkan saat persetujuan/)).toBeInTheDocument();
+      expect(isPending("Selesai")).toBe(true);
+      // Spanduk datar "mulai lagi" tidak boleh muncul di sini: pesanannya memang berjalan,
+      // dan pembayarannya tercatat.
+      expect(screen.queryByText(/Transaksi gagal/)).not.toBeInTheDocument();
+    });
+
+    // Di layar ini ikon "selesai" dan "gagal" bersebelahan. `--primary` (maroon) sebagai warna
+    // "berhasil" membuat keduanya sama-sama kemerahan di tema gelap — dan maroon itu warna
+    // merek, bukan warna status (akar temuan C8).
+    test("ikon selesai memakai token success, BUKAN warna merek", () => {
+      const { container } = render(
+        <MintStatusTracker
+          order={makeOrder({ status: "FAILED", safeStatus: "REJECTED", paymentStatus: "PAID" })}
+        />,
+      );
+      const ikon = [...container.querySelectorAll("li > span")];
+      const selesai = ikon[0].className;
+      const gagal = ikon[1].className;
+      expect(selesai).toContain("bg-success");
+      expect(selesai).not.toContain("bg-primary");
+      expect(gagal).toContain("bg-destructive");
+      expect(selesai).not.toBe(gagal);
+      // Glif dilubangi dengan warna permukaan, bukan putih: `--success`/`--destructive` di tema
+      // gelap terlalu terang untuk menampung glif putih (2,28:1 / 2,77:1).
+      expect(selesai).toContain("text-card");
+      expect(gagal).toContain("text-card");
     });
   });
 

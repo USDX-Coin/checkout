@@ -36,6 +36,26 @@ import type { CheckoutPresentation } from "./types";
  */
 export const PROCESSOR_DISCLOSURE = "Diproses oleh USDX · PT Macan Asia Finance";
 
+/**
+ * Layar "tautan tidak berlaku" — `/s` tanpa token, `/s/{token}` yang ditolak, `/pay/{orderId}`
+ * tanpa sesi. Temuan audit B13: ketiganya dulu hanya satu paragraf, tanpa satu pun tombol.
+ *
+ * SUMBER: Figma `50` blok E, state E1 (partner tak dikenal) dan E2 (partner dikenal).
+ *
+ * Pesan penolakannya sendiri tetap `PARTNER_SESSION_REJECTED_MESSAGE` — satu kalimat untuk semua
+ * sebab, supaya halaman ini tidak jadi orakel yang memberi tahu pemegang tautan acak apakah
+ * suatu pesanan ada. Yang ditambahkan cuma jalan keluarnya.
+ */
+export const PARTNER_REJECTED_COPY = {
+  heading: "Tautan pembayaran tidak berlaku",
+  backCta: "Kembali ke halaman sebelumnya",
+  returnCta: (partner: string | null | undefined): string =>
+    `Kembali ke ${partnerLabel(partner)}`,
+  // Tanpa riwayat dan tanpa `return_url` tervalidasi, tidak ada tombol yang jujur bisa dipasang.
+  // Yang tersisa adalah arahan — dan itu tetap lebih baik daripada layar buntu.
+  noExitNote: "Tutup halaman ini, lalu ulangi pemesanan dari tempat kamu memesan.",
+} as const;
+
 export interface PartnerCopy {
   /** `document.title`. */
   documentTitle: string;

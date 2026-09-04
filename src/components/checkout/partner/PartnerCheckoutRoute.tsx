@@ -14,13 +14,13 @@
 
 import { useSyncExternalStore } from "react";
 import { useParams } from "next/navigation";
-import { PARTNER_SESSION_REJECTED_MESSAGE } from "@/lib/api/partner";
 import {
   getPartnerSessionServerSnapshot,
   getPartnerSessionSnapshot,
   subscribePartnerSession,
 } from "@/lib/partner/session-store";
 import { PartnerCheckout } from "./PartnerCheckout";
+import { PartnerLinkRejected } from "./PartnerLinkRejected";
 
 export function PartnerCheckoutRoute() {
   const params = useParams<{ orderId: string }>();
@@ -40,9 +40,7 @@ export function PartnerCheckoutRoute() {
 
   if (session) return <PartnerCheckout session={session} />;
 
-  return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col items-center justify-center gap-3 px-4 py-8 text-center">
-      <p className="text-sm text-muted-foreground">{PARTNER_SESSION_REJECTED_MESSAGE}</p>
-    </main>
-  );
+  // Pesannya tetap sama untuk semua sebab (lihat `PARTNER_SESSION_REJECTED_MESSAGE`); yang
+  // ditambahkan tiket audit ini cuma jalan keluarnya (B13).
+  return <PartnerLinkRejected />;
 }

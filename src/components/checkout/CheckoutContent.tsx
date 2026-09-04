@@ -16,7 +16,18 @@
 
 import { useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { CheckCircle2, ChevronDown, Clock, Copy, Download, Loader2, QrCode } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Copy,
+  Download,
+  Loader2,
+  QrCode,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "sonner";
 import { useCheckout } from "@/hooks/useCheckout";
@@ -24,6 +35,8 @@ import { returnToApp } from "@/lib/auth/redirect";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
+import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
+import { Button } from "@/components/ui/button";
 import { formatIDR, formatCountdown, formatWibDateTime, truncateAddress } from "@/lib/utils";
 import type { MintChannelOption, MintOrderDetail, PaymentChannel } from "@/types";
 
@@ -61,15 +74,31 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+// Dua pembungkus tipis di atas `ui/button` — bukan gaya sendiri. Yang hilang bersama tombol
+// mentah bukan kerapian, melainkan indikator fokus keyboard (temuan C2): tak satu pun dari 20
+// tombol mentah di repo ini punya `focus-visible`, dan di halaman yang memindahkan uang, orang
+// yang kehilangan jejak posisi kursornya bisa menekan tombol yang salah.
 function BackButton({ onClick, label = "Kembali" }: { onClick: () => void; label?: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex h-[42px] items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-    >
+    <Button type="button" variant="outline" onClick={onClick}>
       {label}
-    </button>
+    </Button>
+  );
+}
+
+function PrimaryButton({
+  onClick,
+  children,
+  disabled,
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <Button type="button" variant="brand" onClick={onClick} disabled={disabled}>
+      {children}
+    </Button>
   );
 }
 
@@ -120,13 +149,9 @@ function QrisInstruction({ order }: { order: MintOrderDetail }) {
       <span className="text-xs text-muted-foreground">
         Scan QR ini di aplikasi bank / e-wallet kamu.
       </span>
-      <button
-        type="button"
-        onClick={download}
-        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
-      >
-        <Download className="size-3.5" /> Unduh QR Code
-      </button>
+      <Button type="button" variant="outline" size="sm" onClick={download}>
+        <Download /> Unduh QR Code
+      </Button>
     </div>
   );
 }
@@ -160,7 +185,7 @@ function PaymentInstructions({
           ) : (
             <>
               <span
-                className="flex h-6 w-9 items-center justify-center rounded text-[10px] font-extrabold tracking-tight"
+                className="flex h-6 w-9 items-center justify-center rounded text-xs font-extrabold tracking-tight"
                 style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
               >
                 {bankBrand.mark}
@@ -177,34 +202,40 @@ function PaymentInstructions({
           <span className="font-mono text-base font-semibold tracking-wider text-foreground">
             {order.virtualAccountNo ? groupDigits(order.virtualAccountNo) : "—"}
           </span>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => order.virtualAccountNo && onCopy(order.virtualAccountNo)}
             aria-label="Salin"
-            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            className="text-muted-foreground"
           >
-            <Copy className="size-4" />
-          </button>
+            <Copy />
+          </Button>
         </div>
       </div>
 
       {order.totalPayIdr && (
         <div>
-          <p className="mb-1 text-xs text-muted-foreground">Jumlah yang harus dibayar</p>
+          {/* Satu nama untuk angka yang sama (D5). Ringkasan di atas menyembunyikan barisnya
+              selama layar ini tampil, jadi "Total bayar" hanya terbaca sekali. */}
+          <p className="mb-1 text-xs text-muted-foreground">{TOTAL_LABEL}</p>
           <div className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
             <span className="text-base font-semibold text-foreground">
               {formatIDR(Number(order.totalPayIdr))}
             </span>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => order.totalPayIdr && onCopy(order.totalPayIdr)}
               aria-label="Salin"
-              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              className="text-muted-foreground"
             >
-              <Copy className="size-4" />
-            </button>
+              <Copy />
+            </Button>
           </div>
-          <p className="mt-1.5 text-xs text-warning">
+          <p className="mt-1.5 text-xs text-warning-text">
             Transfer nominal <span className="font-semibold">persis</span> seperti di atas. Kurang
             atau lebih akan ditandai underpaid/overpaid dan mint ditahan untuk review.
           </p>
@@ -304,7 +335,7 @@ function FeeBreakdown({ order }: { order: MintOrderDetail }) {
         </DetailRow>
       )}
       <div className="mt-1 border-t border-border pt-1">
-        <DetailRow label="Total yang dibayar">{formatIDR(total)}</DetailRow>
+        <DetailRow label={TOTAL_LABEL}>{formatIDR(total)}</DetailRow>
       </div>
     </Accordion>
   );
@@ -339,14 +370,16 @@ function PaymentDetails({
           {order.virtualAccountNo && (
             <DetailRow label="Nomor Virtual Account">
               <span className="font-mono">{groupDigits(order.virtualAccountNo)}</span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => onCopy(order.virtualAccountNo!)}
                 aria-label="Salin nomor Virtual Account"
-                className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                className="text-muted-foreground"
               >
-                <Copy className="size-3.5" />
-              </button>
+                <Copy />
+              </Button>
             </DetailRow>
           )}
         </>
@@ -357,6 +390,10 @@ function PaymentDetails({
   );
 }
 
+// Teks di dalam blok hero BERTINT tidak boleh memakai `--muted-foreground`: tint 10 % sudah
+// menggelapkan latarnya tanpa menggelapkan teksnya, dan hasilnya 4,25:1 — di bawah AA, tepat
+// pada kalimat yang menyangkut uang. Token solid `foreground` dipakai — BUKAN `foreground/80`: nilai ber-alpha keluar sebagai
+// `color-mix()`, dan itu menyulitkan pengukuran ulang di kemudian hari tanpa memberi manfaat.
 function PaidState({
   order,
   onCopy,
@@ -366,14 +403,14 @@ function PaidState({
   onCopy: (text: string) => void;
   onBack: () => void;
 }) {
+  // Mint yang gagal SETELAH uang masuk (multisig REJECTED) tidak lagi lewat sini: ia punya
+  // layarnya sendiri, `FailedPaidState` (B4). Dulu keadaan itu ditampung di sini dengan satu
+  // kalimat yang berbeda di bawah judul hijau yang sama — dan judul yang menang dibaca.
   const paidAt = formatWibDateTime(order.paidAt);
-  // Mint bisa gagal SETELAH uang masuk (multisig REJECTED). Kalau itu terjadi, tracker di bawah
-  // sudah bilang "Transaksi gagal" — janji "sedang diproses" di atasnya jadi bertentangan.
-  const failed = order.status === "FAILED";
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 p-4 text-center">
-        <span className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success">
+        <span className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success-text">
           <CheckCircle2 className="size-6" />
         </span>
         <p className="text-sm font-semibold text-foreground">Pembayaran diterima</p>
@@ -382,11 +419,9 @@ function PaidState({
             {formatIDR(Number(order.totalPayIdr))}
           </p>
         )}
-        {paidAt && <p className="text-xs text-muted-foreground">{paidAt}</p>}
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {failed
-            ? "Tidak perlu transfer lagi. Pembayaran kamu tercatat — lihat status di bawah."
-            : "Tidak perlu transfer lagi. Pesanan kamu sedang diproses."}
+        {paidAt && <p className="text-xs text-foreground">{paidAt}</p>}
+        <p className="text-xs leading-relaxed text-foreground">
+          Tidak perlu transfer lagi. Pesanan kamu sedang diproses.
         </p>
       </div>
 
@@ -397,13 +432,111 @@ function PaidState({
       {/* Layar ini bilang "halaman boleh ditutup" — tanpa tombol ini user disuruh pulang tanpa
           diberi jalan pulang. Proses on-chain menunggu multisig dan bisa berjam-jam, jadi tempat
           menunggunya di app (yang punya notifikasi), bukan di tab checkout yang dibiarkan terbuka. */}
-      <button
-        type="button"
-        onClick={onBack}
-        className="brand-gradient flex h-[42px] items-center justify-center rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-      >
-        Kembali ke app
-      </button>
+      <Button type="button" variant="brand" onClick={onBack}>
+        {CHECKOUT_COPY.backToAppCta}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Nomor pesanan sebagai RUJUKAN yang bisa disalin.
+ *
+ * Ini yang menggantikan tombol "Hubungi dukungan" pada desain layar gagal (Figma `50` blok C).
+ * Salurannya belum ada di kode — tidak ada alamat email dukungan, tidak ada tautan chat, tidak
+ * ada nomor telepon. Tombol yang tidak menuju ke mana-mana di layar tempat uang user tertahan
+ * bukan sekadar mati: ia janji palsu. Yang benar-benar bisa dipakai user hari ini adalah nomor
+ * pesanannya — lewat kanal apa pun yang nanti dia temukan.
+ */
+function OrderReference({ order, onCopy }: { order: MintOrderDetail; onCopy: (t: string) => void }) {
+  return (
+    <div>
+      <p className="mb-1 text-xs text-muted-foreground">{CHECKOUT_COPY.orderReferenceLabel}</p>
+      <div className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
+        <span className="font-mono text-sm font-semibold text-foreground">{order.orderNumber}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onCopy(order.orderNumber)}
+          aria-label={CHECKOUT_COPY.copyAriaLabel}
+          className="text-muted-foreground"
+        >
+          <Copy />
+        </Button>
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground">{CHECKOUT_COPY.orderReferenceNote}</p>
+    </div>
+  );
+}
+
+/**
+ * Uang SUDAH masuk, pesanannya GAGAL. Temuan audit B4, dan yang paling berbahaya dari semuanya.
+ *
+ * DUA jalan sampai ke sini, dan nasib uangnya berbeda — jadi kalimatnya juga (`sot/conventions.md
+ * § Status Enums`, `sot/bni-integration.md §6`):
+ *
+ *   PAID + FAILED   Pembayaran cocok, mint ditolak multisig sesudahnya. Dana ada di kami dan
+ *                   ditangani lewat jalur pesanan ini.
+ *   HELD + FAILED   Ops MENOLAK kredit yang ditahan; `payment_status` tetap `HELD` karena enum-nya
+ *                   tak punya `FAILED` dan uangnya memang masuk. Refund IDR **manual** oleh
+ *                   treasury — tak ada auto-refund. Ini yang dulu keliru dirender sebagai
+ *                   "sedang ditinjau": reviewnya sudah selesai, dan hasilnya tolak.
+ *
+ * Dulu keadaan ini jatuh ke `PaidState` dan berbunyi "Pembayaran diterima" di atas blok hijau —
+ * PERSIS sama dengan pesanan sehat, dengan satu kalimat kecil yang berbeda. Orang membaca warna
+ * dan judul, bukan kalimat keempat; hasilnya user mengira pesanannya aman padahal sudah mati.
+ *
+ * Tiga hal yang membedakannya sekarang, mengikuti Figma `50` blok C: judul menyebut yang gagal
+ * ("Pengiriman USDX gagal"), nadanya destructive bukan success, dan nasib uangnya dinyatakan
+ * terang-terangan — sudah diterima, tercatat, jangan transfer lagi.
+ */
+function FailedPaidState({
+  order,
+  onCopy,
+  onBack,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+  onBack: () => void;
+}) {
+  const paidAt = formatWibDateTime(order.paidAt);
+  // Kredit yang ditolak ops: nominal yang benar-benar masuk TIDAK dikirim ke FE (justru
+  // ketidakcocokannya yang menyeret order ke HELD), jadi tak ada angka yang boleh diklaim.
+  const rejectedHeld = order.paymentStatus === "HELD";
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl bg-destructive/10 p-4 text-center">
+        <span className="flex size-10 items-center justify-center rounded-full bg-destructive/15 text-destructive-text">
+          <XCircle className="size-6" />
+        </span>
+        <p className="text-sm font-semibold text-destructive-text">
+          {rejectedHeld ? CHECKOUT_COPY.heldRejectedHeading : CHECKOUT_COPY.failedPaidHeading}
+        </p>
+        {!rejectedHeld && order.totalPayIdr && (
+          <p className="text-lg font-semibold text-foreground">
+            {CHECKOUT_COPY.failedPaidAmount(formatIDR(Number(order.totalPayIdr)))}
+          </p>
+        )}
+        {paidAt && <p className="text-xs text-foreground">{paidAt}</p>}
+        <p className="text-xs leading-relaxed text-foreground">
+          {rejectedHeld ? CHECKOUT_COPY.heldRejectedBodyLead : CHECKOUT_COPY.failedPaidBodyLead}{" "}
+          <span className="font-semibold text-foreground">
+            {rejectedHeld
+              ? CHECKOUT_COPY.heldRejectedBodyWarning
+              : CHECKOUT_COPY.failedPaidBodyWarning}
+          </span>{" "}
+          {rejectedHeld ? CHECKOUT_COPY.heldRejectedBodyTail : CHECKOUT_COPY.failedPaidBodyTail}
+        </p>
+      </div>
+
+      <MintStatusTracker order={order} />
+
+      <OrderReference order={order} onCopy={onCopy} />
+
+      <PaymentDetails order={order} onCopy={onCopy} />
+
+      <BackButton onClick={onBack} label={CHECKOUT_COPY.backToAppCta} />
     </div>
   );
 }
@@ -425,21 +558,24 @@ function HeldState({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-1.5 rounded-xl bg-warning/10 p-4 text-center">
-        <span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning">
+        <span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning-text">
           <Clock className="size-6" />
         </span>
         <p className="text-sm font-semibold text-foreground">Pembayaran sedang ditinjau</p>
-        {paidAt && <p className="text-xs text-muted-foreground">{paidAt}</p>}
-        <p className="text-xs leading-relaxed text-muted-foreground">
+        {paidAt && <p className="text-xs text-foreground">{paidAt}</p>}
+        <p className="text-xs leading-relaxed text-foreground">
           Transfer kamu sudah kami terima, tapi belum cocok otomatis dengan pesanan ini. Tim kami
-          sedang memeriksanya. <span className="font-semibold">Jangan transfer lagi</span> — hubungi
-          dukungan kalau butuh bantuan.
+          sedang memeriksanya. <span className="font-semibold">Jangan transfer lagi.</span>
         </p>
       </div>
 
+      {/* Sama seperti layar gagal: nomor pesanan sebagai rujukan, BUKAN "hubungi dukungan" yang
+          salurannya belum ada di kode. */}
+      <OrderReference order={order} onCopy={onCopy} />
+
       <PaymentDetails order={order} onCopy={onCopy} />
 
-      <BackButton onClick={onBack} label="Kembali ke app" />
+      <BackButton onClick={onBack} label={CHECKOUT_COPY.backToAppCta} />
     </div>
   );
 }
@@ -453,7 +589,7 @@ function DeadState({ order, onBack }: { order: MintOrderDetail; onBack: () => vo
   const gagalBukanKedaluwarsa = order.status === "FAILED" && order.paymentStatus !== "EXPIRED";
   return (
     <div className="flex flex-col items-center gap-3 py-4 text-center">
-      <p className="text-sm font-medium text-destructive">
+      <p className="text-sm font-medium text-destructive-text">
         {gagalBukanKedaluwarsa ? "Transaksi gagal." : "Pesanan kedaluwarsa."}
       </p>
       <p className="text-xs text-muted-foreground">
@@ -465,12 +601,72 @@ function DeadState({ order, onBack }: { order: MintOrderDetail; onBack: () => vo
   );
 }
 
+/**
+ * Pesanan tak bisa ditampilkan — dan SEBABNYA menentukan apa yang boleh dikatakan (B5, B14).
+ *
+ * Dulu 404, 500, jaringan mati, dan URL salah ketik sama-sama berbunyi "Pesanan tidak ditemukan
+ * atau sesi tidak valid" tanpa satu tombol pun. Untuk 500 kalimat itu bukan cuma tidak membantu,
+ * ia salah: pesanannya mungkin ada, uangnya mungkin sudah bergerak, dan yang dibutuhkan user
+ * cuma memuat ulang.
+ */
+function LoadFailedState({
+  kind,
+  onRetry,
+  isRetrying,
+  onBack,
+}: {
+  kind: "malformed-id" | "not-found" | "unavailable";
+  onRetry: () => void;
+  isRetrying: boolean;
+  /** Pulang ke `app` — mendarat di Riwayat, tempat pesanannya benar-benar terlihat. */
+  onBack: () => void;
+}) {
+  if (kind === "unavailable") {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive-text">
+          <AlertCircle className="size-6" />
+        </span>
+        <p className="text-sm font-semibold text-foreground">
+          {CHECKOUT_COPY.unavailableHeading}
+        </p>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {CHECKOUT_COPY.unavailableBody}
+        </p>
+        <PrimaryButton onClick={onRetry} disabled={isRetrying}>
+          <RefreshCw className={isRetrying ? "size-4 animate-spin" : "size-4"} />
+          {isRetrying ? CHECKOUT_COPY.retryingCta : CHECKOUT_COPY.retryCta}
+        </PrimaryButton>
+        <Button type="button" variant="link" onClick={onBack}>
+          {CHECKOUT_COPY.backToAppCta}
+        </Button>
+      </div>
+    );
+  }
+
+  const notFound = kind === "not-found";
+  return (
+    <div className="flex flex-col items-center gap-3 py-8 text-center">
+      <span className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive-text">
+        <XCircle className="size-6" />
+      </span>
+      <p className="text-sm font-semibold text-foreground">
+        {notFound ? CHECKOUT_COPY.notFoundHeading : CHECKOUT_COPY.malformedIdHeading}
+      </p>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        {notFound ? CHECKOUT_COPY.notFoundBody : CHECKOUT_COPY.malformedIdBody}
+      </p>
+      <BackButton onClick={onBack} label={CHECKOUT_COPY.openHistoryCta} />
+    </div>
+  );
+}
+
 function SuccessState({ order, onBack }: { order: MintOrderDetail; onBack: () => void }) {
   const explorer = order.onChainTxHash ? txExplorerUrl(order.chain, order.onChainTxHash) : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-2 py-2 text-center">
-        <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success">
+        <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success-text">
           <CheckCircle2 className="size-8" />
         </span>
         <p className="text-base font-semibold text-foreground">Mint Berhasil</p>
@@ -488,20 +684,16 @@ function SuccessState({ order, onBack }: { order: MintOrderDetail; onBack: () =>
             href={explorer}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-mono text-xs text-primary-700 hover:underline"
+            className="font-mono text-xs text-primary-text hover:underline"
           >
             {truncateAddress(order.onChainTxHash, 6)}
           </a>
         </Row>
       )}
 
-      <button
-        type="button"
-        onClick={onBack}
-        className="brand-gradient flex h-[42px] items-center justify-center rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-      >
-        Kembali ke app
-      </button>
+      <Button type="button" variant="brand" onClick={onBack}>
+        {CHECKOUT_COPY.backToAppCta}
+      </Button>
     </div>
   );
 }
@@ -514,12 +706,16 @@ export function CheckoutContent() {
     order,
     isLoading,
     isError,
+    errorKind,
     isUnauthorized,
+    retry,
+    isRetrying,
     pay,
     isPaying,
     payError,
     secondsLeft,
     isExpired,
+    deadlineExtended,
   } = useCheckout(id);
 
   function copy(text: string) {
@@ -545,9 +741,40 @@ export function CheckoutContent() {
   // Order sudah mati: timer klien habis, ATAU backend menutupnya (Expiry Handler menulis
   // paymentStatus=EXPIRED + status=FAILED sekaligus, jadi `isExpired` yang di-guard !isTerminal
   // tak pernah menyala untuk kasus itu). VA-nya tak berlaku lagi — jangan tampilkan tagihan.
-  const isDead = Boolean(order) && (isExpired || order!.status === "FAILED" || order!.paymentStatus === "EXPIRED");
+  // `status === "COMPLETED"` MENGGUGURKAN "mati": order yang sudah selesai tapi jendela bayarnya
+  // lewat (`paymentStatus=EXPIRED`) bukan pesanan kedaluwarsa — dan menyebutnya begitu membuat
+  // orang mengira pesanan yang sudah jadi itu hangus.
+  const isDead =
+    Boolean(order) &&
+    order!.status !== "COMPLETED" &&
+    (isExpired || order!.status === "FAILED" || order!.paymentStatus === "EXPIRED");
+  // Uang masuk TAPI pesanannya gagal (B4). Dicabut dari `moneyIn` supaya tidak lagi memakai layar
+  // hijau "Pembayaran diterima" yang identik dengan pesanan sehat.
+  //
+  // HELD ikut, dan itu bukan kelonggaran: `sot/conventions.md § Status Enums` + `bni-integration.md
+  // §6` menyatakan ops yang MENOLAK kredit menulis `status=FAILED` sementara `payment_status`
+  // TETAP `HELD`. Memeriksa `PAID` saja membuat keadaan itu jatuh ke layar "sedang ditinjau" —
+  // padahal reviewnya sudah selesai, hasilnya tolak, dan dananya menunggu refund manual.
+  const failedAfterMoneyIn = Boolean(moneyIn) && order?.status === "FAILED";
+  // Satu-satunya keadaan yang boleh menampilkan tagihan. Enum baru dari backend TIDAK boleh
+  // jatuh ke sini (temuan validator no. 4): menyuruh transfer untuk keadaan yang tak kita pahami
+  // adalah fallback termahal yang bisa dipilih.
+  const awaitingPayment = order?.paymentStatus === "WAITING_FOR_PAYMENT";
   // Countdown = sisa waktu BAYAR. Setelah uang masuk / order mati ia tak punya arti.
-  const showCountdown = Boolean(order) && !moneyIn && !isDead && order!.status !== "COMPLETED";
+  const showCountdown =
+    Boolean(order) &&
+    !moneyIn &&
+    !isDead &&
+    order!.status !== "COMPLETED" &&
+    (awaitingPayment || order!.paymentStatus === "REQUESTED");
+  // Sebelum metode dipilih, `expiresAt` = batas hidup ORDER. Sesudah /pay ia diganti batas hidup
+  // instrumen bayar (VA/QRIS) yang jauh lebih panjang — satu label untuk dua tenggat itulah yang
+  // membuat angkanya terlihat melompat (F2). Jadi labelnya ikut berganti bersama artinya.
+  const beforeMethod = order?.paymentStatus === "REQUESTED";
+  // Instruksi bayar sedang tampil → di situ "Total bayar" sudah tercetak besar; barisnya di
+  // ringkasan disembunyikan supaya satu angka tidak muncul dua kali dengan dua nama (D5).
+  const showInstructions =
+    Boolean(order) && !isCompleted && !moneyIn && !isDead && Boolean(awaitingPayment);
   // Perbandingan ketat: field absen (backend lama) atau nilai tak dikenal → diperlakukan LIVE,
   // banner simulasi TIDAK tampil. Salah tampil di dev cuma bikin bingung; salah tampil di prod
   // memberi tahu user bahwa transfer sungguhannya tidak diproses.
@@ -567,7 +794,7 @@ export function CheckoutContent() {
         // saat redirect no-op (mis. localhost tanpa NEXT_PUBLIC_APP_URL). USDX-378.
         <Card>
           <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <p className="text-sm font-medium text-destructive">Sesi checkout kedaluwarsa</p>
+            <p className="text-sm font-medium text-destructive-text">Sesi checkout kedaluwarsa</p>
             <p className="text-sm text-muted-foreground">
               Buka ulang halaman ini dari aplikasi USDX untuk melanjutkan.
             </p>
@@ -576,19 +803,30 @@ export function CheckoutContent() {
         </Card>
       ) : isError || !order ? (
         <Card>
-          <div className="flex flex-col items-center gap-4 py-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              Pesanan tidak ditemukan atau sesi tidak valid.
-            </p>
-            <BackButton onClick={() => router.back()} />
-          </div>
+          <LoadFailedState
+            kind={errorKind}
+            onRetry={retry}
+            isRetrying={isRetrying}
+            onBack={backToApp}
+          />
         </Card>
       ) : (
         <>
           {showCountdown && (
-            <div className="rounded-lg bg-primary/5 px-4 py-2.5 text-center text-sm text-foreground">
-              Pembayaran berakhir dalam{" "}
-              <span className="font-semibold tabular-nums">{formatCountdown(secondsLeft)}</span>
+            <div className="flex flex-col gap-1 rounded-lg bg-primary/5 px-4 py-2.5 text-center text-sm text-foreground">
+              <span>
+                {beforeMethod
+                  ? CHECKOUT_COPY.countdownBeforeMethod
+                  : CHECKOUT_COPY.countdownAfterMethod(order.paymentChannel)}{" "}
+                <span className="font-semibold tabular-nums">{formatCountdown(secondsLeft)}</span>
+              </span>
+              {/* Lompatan angkanya diakui, bukan disembunyikan — dan hanya kepada orang yang
+                  benar-benar menyaksikannya di tab ini (F2). */}
+              {!beforeMethod && deadlineExtended && (
+                <span className="text-xs text-muted-foreground">
+                  {CHECKOUT_COPY.countdownExtendedNote(order.paymentChannel)}
+                </span>
+              )}
             </div>
           )}
 
@@ -599,12 +837,14 @@ export function CheckoutContent() {
             </div>
 
             {/* Dua angka, dua nama berbeda: "Nilai pesanan" (sebelum biaya layanan PG) vs
-                "Total yang dibayar" (yang benar-benar ditagih). Dulu keduanya sama-sama disebut
+                "Total bayar" (yang benar-benar ditagih). Dulu keduanya sama-sama disebut
                 "pembayaran" dengan angka berbeda — pemicu ragu tepat di layar bayar. */}
             <Row label="Nilai pesanan">{formatIDR(Number(order.totalBeforePgFeeIdr))}</Row>
             {order.totalPayIdr && (
               <>
-                <Row label="Total yang dibayar">{formatIDR(Number(order.totalPayIdr))}</Row>
+                {!showInstructions && (
+                  <Row label={TOTAL_LABEL}>{formatIDR(Number(order.totalPayIdr))}</Row>
+                )}
                 <FeeBreakdown order={order} />
               </>
             )}
@@ -614,25 +854,31 @@ export function CheckoutContent() {
               <span className="font-mono text-xs">
                 {order.chain} · {truncateAddress(order.userAddress)}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => copy(order.userAddress)}
                 aria-label="Salin"
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="text-muted-foreground"
               >
-                <Copy className="size-3.5" />
-              </button>
+                <Copy />
+              </Button>
             </Row>
 
             <div className="border-t border-border" />
 
             {/* Urutan cabang mengikuti "di mana uangnya", bukan sekadar enum: sudah selesai →
-                uang sudah masuk → order mati → belum pilih metode → sisanya menunggu bayar.
+                uang masuk tapi pesanan gagal → uang sudah masuk → order mati → belum pilih
+                metode → sisanya menunggu bayar.
                 `moneyIn` sengaja MENDAHULUI `isDead`: order PAID yang mint-nya gagal tetap harus
-                menampilkan bahwa uangnya diterima (trackernya yang bilang gagal), bukan
-                "Pesanan kedaluwarsa" yang bikin user mengira uangnya hangus. */}
+                menampilkan bahwa uangnya diterima, bukan "Pesanan kedaluwarsa" yang bikin user
+                mengira uangnya hangus. Yang berubah (B4): keadaan itu tidak lagi memakai layar
+                hijau yang sama dengan pesanan sehat, melainkan layarnya sendiri. */}
             {isCompleted ? (
               <SuccessState order={order} onBack={backToApp} />
+            ) : failedAfterMoneyIn ? (
+              <FailedPaidState order={order} onCopy={copy} onBack={backToApp} />
             ) : moneyIn ? (
               order.paymentStatus === "HELD" ? (
                 <HeldState order={order} onCopy={copy} onBack={backToApp} />
@@ -659,12 +905,38 @@ export function CheckoutContent() {
                 }}
                 onCancel={() => router.back()}
               />
+            ) : !awaitingPayment ? (
+              // Fallback aman untuk keadaan yang tak dikenal (enum baru, kombinasi kontradiktif).
+              // Yang penting di sini adalah apa yang TIDAK dirender: tanpa nomor VA, tanpa
+              // "Total bayar", tanpa countdown, tanpa satu pun kalimat yang menyuruh transfer.
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <span className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <AlertCircle className="size-6" />
+                </span>
+                <p className="text-sm font-semibold text-foreground">
+                  {CHECKOUT_COPY.unknownStateHeading}
+                </p>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {CHECKOUT_COPY.unknownStateBody}
+                </p>
+                <OrderReference order={order} onCopy={copy} />
+                <BackButton onClick={backToApp} label={CHECKOUT_COPY.openHistoryCta} />
+              </div>
             ) : (
               <div className="flex flex-col gap-4">
                 <PaymentInstructions order={order} onCopy={copy} />
                 <HowToPay channel={order.paymentChannel} isSimulation={isSimulation} />
                 <div className="border-t border-border" />
                 <MintStatusTracker order={order} />
+                {/* Temuan F1: ini satu-satunya layar yang dulu tak punya jalan pulang. Tombol
+                    "Batal" hilang bersama pemilih metode, dan tidak ada penggantinya — justru di
+                    layar tempat orang paling mungkin berpikir ulang. Nomor VA tidak hangus karena
+                    halamannya ditutup, dan kalimat di bawah tombol yang memastikan itu. */}
+                <div className="border-t border-border" />
+                <BackButton onClick={backToApp} label={CHECKOUT_COPY.backToAppCta} />
+                <p className="-mt-2 text-center text-xs text-muted-foreground">
+                  {CHECKOUT_COPY.leaveNote(order.paymentChannel)}
+                </p>
               </div>
             )}
 

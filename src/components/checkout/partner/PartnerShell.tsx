@@ -19,6 +19,7 @@
 
 import type { CSSProperties } from "react";
 import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { accentTextPair, resolveBrand } from "@/lib/partner/brand";
 import type { CheckoutPresentation, PartnerBranding } from "@/lib/partner/types";
 
@@ -92,14 +93,16 @@ export function PartnerShell({
             ) : null}
 
             {onBack && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={onBack}
                 aria-label="Kembali"
-                className="shrink-0 text-foreground transition-opacity hover:opacity-70"
+                className="-ml-1"
               >
-                <ArrowLeft className="size-5" />
-              </button>
+                <ArrowLeft />
+              </Button>
             )}
 
             <h1 className="text-lg font-semibold tracking-tight text-foreground">{title}</h1>

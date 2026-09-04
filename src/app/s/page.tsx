@@ -5,7 +5,7 @@
 // semua kegagalan lain agar tidak memberi tahu apakah suatu pesanan ada.
 
 import type { Metadata } from "next";
-import { PARTNER_SESSION_REJECTED_MESSAGE } from "@/lib/api/partner";
+import { PartnerLinkRejected } from "@/components/checkout/partner/PartnerLinkRejected";
 
 // Judul netral (lihat catatan di `/pay/[orderId]/page.tsx`).
 export const metadata: Metadata = {
@@ -14,9 +14,5 @@ export const metadata: Metadata = {
 };
 
 export default function PartnerSessionMissingPage() {
-  return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col items-center justify-center gap-3 px-4 py-8 text-center">
-      <p className="text-sm text-muted-foreground">{PARTNER_SESSION_REJECTED_MESSAGE}</p>
-    </main>
-  );
+  return <PartnerLinkRejected />;
 }

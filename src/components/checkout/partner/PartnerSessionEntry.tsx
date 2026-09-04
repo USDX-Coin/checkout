@@ -17,9 +17,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { PARTNER_SESSION_REJECTED_MESSAGE, resolvePartnerSession } from "@/lib/api/partner";
+import { resolvePartnerSession } from "@/lib/api/partner";
 import { readPartnerTokenFromPath, stripPartnerTokenFromUrl } from "@/lib/partner/entry";
 import { savePartnerSession } from "@/lib/partner/session-store";
+import { PartnerLinkRejected } from "./PartnerLinkRejected";
 
 export function PartnerSessionEntry() {
   const router = useRouter();
@@ -52,15 +53,14 @@ export function PartnerSessionEntry() {
 
   const rejected = !token || resolve.isError;
 
+  // Tautan ditolak → layar yang punya jalan keluar, bukan paragraf buntu (B13).
+  if (rejected) return <PartnerLinkRejected />;
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col items-center justify-center gap-3 px-4 py-8 text-center">
-      {rejected ? (
-        <p className="text-sm text-muted-foreground">{PARTNER_SESSION_REJECTED_MESSAGE}</p>
-      ) : (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-5 animate-spin" /> Membuka pembayaran…
-        </p>
-      )}
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" /> Membuka pembayaran…
+      </p>
     </main>
   );
 }
