@@ -8,7 +8,9 @@ import {
   QueryCache,
   MutationCache,
 } from "@tanstack/react-query";
-import { Toaster, toast } from "sonner";
+import { MotionConfig } from "motion/react";
+import { toast } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { isRateLimited } from "@/lib/api/errors";
 
 // Central 429 RATE_LIMITED handling (USDX-252). The mint throughput throttle
@@ -46,11 +48,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
   });
 
   return (
+    // `richColors` is off: a toast's tone comes from its icon, not from a tinted
+    // panel that has to sit on top of arbitrary content. `MotionConfig
+    // reducedMotion="user"` is the `motion` half of reduced motion; the CSS half
+    // already rides the `--dur-*` tokens.
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-        <Toaster richColors position="top-center" />
-      </QueryClientProvider>
+      <MotionConfig reducedMotion="user">
+        <QueryClientProvider client={queryClient}>
+          {children}
+          <Toaster position="top-center" />
+        </QueryClientProvider>
+      </MotionConfig>
     </ThemeProvider>
   );
 }
