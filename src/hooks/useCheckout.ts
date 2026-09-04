@@ -10,26 +10,47 @@
 // pakai token itu sebagai bearer. Code invalid/kedaluwarsa/terpakai (401) → sesi tak valid
 // → redirect balik ke `app`. Refresh dalam tab pakai token tersimpan (sessionStorage).
 //
-// DEMO mode (env.demoAutocomplete, dev/preview only): simulasikan HANYA konfirmasi
-// pembayaran (paymentStatus → PAID, status → WAITING_FOR_APPROVAL "menunggu approval")
-// supaya demo lanjut tanpa provider bayar real. TIDAK memalsukan COMPLETED/on-chain — sejak
-// W4 pipeline Safe real (Auto-Propose → sign → execute) jalan di dev; "on-chain berhasil"
-// HANYA dari backend real (status=COMPLETED + onChainTxHash). Override TAMPILAN saja; OFF di
-// prod (USDX-293: dulu demo maju paksa ke COMPLETED → user dikira sudah mint padahal belum).
+// TIDAK ADA mode demo/simulasi di sini. Dulu ada `NEXT_PUBLIC_DEMO_AUTOCOMPLETE` yang memaksa
+// tampilan jadi "Pembayaran diterima" 4 detik setelah user pilih bank, tanpa satu rupiah pun
+// berpindah — dan itu nyala di dev & staging, persis lingkungan tempat UAT DurianPay sandbox
+// dijalankan, sehingga layar bukti pembayaran tak bisa dibedakan dari yang sungguhan.
+// Alasannya sudah hilang: DurianPay SNAP sandbox jalan di dev dan punya simulator bayar
+// sendiri, jadi PAID yang sungguhan bisa dipicu tanpa memalsukan apa pun.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { exchangeHandoffCode } from "@/lib/api/auth";
 import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
+import { isOrderIdWellFormed } from "@/lib/checkout/order-id";
 import { readHandoffCodeFromHash, getToken, setToken } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
-import { env } from "@/lib/env";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
 const POLL_MS = 3000; // jauh di bawah throttle 5 req/detik (conventions.md § Rate Limiting)
-const DEMO_STEP_MS = 4000; // jeda tiap tahap saat demo auto-complete
 const TERMINAL = new Set(["COMPLETED", "FAILED"]);
+
+/**
+ * Kenapa GET order gagal — dipakai halaman untuk memilih layar, bukan sekadar "error" (B5).
+ *
+ *   `malformed-id`  URL-nya tidak memuat nomor pesanan berbentuk UUID. Bukan soal server.
+ *   `not-found`     404: pesanan memang tidak ada / bukan milik user. Mengulang tak menolong.
+ *   `unavailable`   5xx, jaringan mati, apa pun yang bukan dua di atas. Pesanan MUNGKIN ada dan
+ *                   pembayaran tidak terpengaruh — di sinilah tombol "Coba lagi" berguna, dan
+ *                   di sinilah "Pesanan tidak ditemukan" jadi kebohongan yang menyuruh menyerah.
+ */
+export type CheckoutErrorKind = "malformed-id" | "not-found" | "unavailable";
+
+function errorKindOf(error: unknown, malformedId: boolean): CheckoutErrorKind {
+  if (malformedId) return "malformed-id";
+  if (isApiError(error)) {
+    if (error.status === 404) return "not-found";
+    // 400/422 dari pipe validasi = id yang tak lolos bentuknya di sisi server. Sama artinya
+    // dengan `malformed-id`, cuma yang memutuskan backend.
+    if (error.status === 400 || error.status === 422) return "malformed-id";
+  }
+  return "unavailable";
+}
 
 // Pesan error /pay dalam Bahasa Indonesia (checkout internal, single-locale).
 function payErrorMessage(error: unknown): string | null {
@@ -48,6 +69,11 @@ function payErrorMessage(error: unknown): string | null {
 
 export function useCheckout(id: string) {
   const queryClient = useQueryClient();
+
+  // `/checkout/bukan-uuid` (USDX-audit B14). Request tetap dijalankan seperti biasa — ini hanya
+  // menentukan PESAN dan mematikan redirect otomatis, supaya URL yang salah ketik dijawab
+  // kalimat yang jelas, bukan dilempar diam-diam ke halaman login `app`.
+  const malformedId = Boolean(id) && !isOrderIdWellFormed(id);
 
   // Baca one-time handoff `#code=` dari URL hash SEKALI saat render pertama (lazy
   // useState jalan sebelum effect & sebelum queryFn React Query) + STRIP dari URL
@@ -90,9 +116,21 @@ export function useCheckout(id: string) {
     refetchInterval: (q) => {
       const o = q.state.data;
       if (!o || TERMINAL.has(o.status)) return false;
-      if (new Date(o.expiresAt).getTime() <= Date.now()) return false; // expired → stop
-      // Poll selama menunggu konfirmasi pembayaran / settlement on-chain.
-      const polling = o.paymentStatus === "WAITING_FOR_PAYMENT" || o.status === "WAITING_FOR_APPROVAL";
+      // `expiresAt` = batas jendela BAYAR. Order yang sudah PAID lewat batas itu bukan expired —
+      // ia sedang menunggu persetujuan multisig yang bisa berjam-jam. Kalau polling ikut berhenti
+      // di situ, halaman tak akan pernah tahu order sudah COMPLETED (Tugas 6 poin 2/3).
+      // `HELD` ikut dikecualikan bersama `PAID`: order jadi HELD justru lewat transfer TELAT
+      // (pasca-`EXPIRED`, `sot/bni-integration.md §6`), jadi batas bayarnya memang sudah lewat.
+      // Menghentikan polling di situ membuat layarnya basi selamanya.
+      if (o.paymentStatus !== "PAID" && o.paymentStatus !== "HELD" && new Date(o.expiresAt).getTime() <= Date.now())
+        return false;
+      // Poll selama menunggu konfirmasi pembayaran / settlement on-chain / putusan ops atas
+      // kredit yang ditahan. HELD menunggu MANUSIA (antrean "Mint Bermasalah"), dan hasilnya —
+      // accept → WAITING_FOR_APPROVAL, reject → FAILED — mengubah layar sepenuhnya.
+      const polling =
+        o.paymentStatus === "WAITING_FOR_PAYMENT" ||
+        o.paymentStatus === "HELD" ||
+        o.status === "WAITING_FOR_APPROVAL";
       if (!polling) return false;
       // Mundur ke Retry-After saat 429 RATE_LIMITED (≥1s) — jangan hammer throttle
       // (USDX-252). `retry: false` di bawah sudah cegah retry-storm per tick.
@@ -113,32 +151,35 @@ export function useCheckout(id: string) {
   const isUnauthorized =
     exchangeFailed || (isApiError(query.error) && query.error.status === 401);
   useEffect(() => {
-    if (isUnauthorized) redirectToApp();
-  }, [isUnauthorized]);
+    // Nomor pesanan yang bentuknya sudah salah TIDAK dilempar ke `app`: tanpa sesi apa pun,
+    // GET-nya memang 401 (guard auth jalan duluan), dan redirect-nya membuat user yang salah
+    // ketik URL mendarat di halaman login tanpa satu kalimat pun penjelasan (B14).
+    if (isUnauthorized && !malformedId) redirectToApp();
+  }, [isUnauthorized, malformedId]);
 
-  // ── DEMO: simulasi konfirmasi bayar saja (env-gated, dev/preview) ───────────
-  // Setelah order ter-bayar (paymentStatus != REQUESTED), majukan TAMPILAN ke PAID /
-  // "menunggu approval" lalu BERHENTI. Settlement on-chain (COMPLETED + onChainTxHash)
-  // datang dari pipeline Safe real — demo tak lagi memalsukannya (USDX-293). Deps [paidish]
-  // stabil `true` setelah bayar → timer aman dari cleanup tiap poll.
-  const [demoPaid, setDemoPaid] = useState(false);
-  const paidish = fetched !== null && fetched.paymentStatus !== "REQUESTED";
+  // Tak ada lagi lapisan simulasi di sini: apa yang tampil = apa yang dikatakan backend.
+  const order = fetched;
+
+  // AKAR temuan F2 (countdown melompat 11:07 → 59:52): `expiresAt` bukan satu tenggat. Sebelum
+  // metode dipilih ia batas hidup ORDER; POST /pay menerbitkan VA dan mengembalikan order yang
+  // sama dengan `expiresAt` BARU — batas hidup VA, biasanya jauh lebih panjang. Bukan pembulatan
+  // dan bukan jam klien: sumber waktunya yang berganti, di slot tampilan yang sama.
+  //
+  // Yang bisa dilakukan halaman tanpa mengubah kontrak API: menamai kedua tenggat itu berbeda
+  // (lihat `CHECKOUT_COPY.countdown*`) dan MENGAKUI lompatannya kepada orang yang menyaksikannya.
+  // Ref, bukan state: nilainya cuma dibaca saat render berikutnya, tak perlu memicu render.
+  const lastDeadline = useRef<number | null>(null);
+  const [deadlineExtended, setDeadlineExtended] = useState(false);
   useEffect(() => {
-    if (!env.demoAutocomplete || !paidish) return;
-    const t = setTimeout(() => setDemoPaid(true), DEMO_STEP_MS);
-    return () => clearTimeout(t);
-  }, [paidish]);
-
-  const order = useMemo<MintOrderDetail | null>(() => {
-    if (!fetched || !env.demoAutocomplete || !demoPaid) return fetched;
-    // "Menunggu approval" per conventions.md § Status Enums → Mint Order.
-    return {
-      ...fetched,
-      paymentStatus: "PAID",
-      status: "WAITING_FOR_APPROVAL",
-      safeStatus: "PENDING_APPROVAL",
-    };
-  }, [fetched, demoPaid]);
+    if (!order) return;
+    const next = new Date(order.expiresAt).getTime();
+    if (!Number.isFinite(next)) return;
+    const prev = lastDeadline.current;
+    lastDeadline.current = next;
+    // Ambang 1 detik: pembaruan poll yang mengembalikan tenggat sama persis tak boleh terbaca
+    // sebagai perpanjangan.
+    if (prev !== null && next - prev > 1000) setDeadlineExtended(true);
+  }, [order]);
 
   // Tick 1 detik menggerakkan tampilan countdown.
   const [now, setNow] = useState(() => Date.now());
@@ -151,7 +192,15 @@ export function useCheckout(id: string) {
   const secondsLeft = order
     ? Math.max(0, Math.floor((new Date(order.expiresAt).getTime() - now) / 1000))
     : 0;
-  const isExpired = Boolean(order) && !isTerminal && secondsLeft <= 0;
+  // Sudah dibayar = jendela bayar tak berlaku lagi; layar "Pesanan kedaluwarsa" untuk user yang
+  // sudah transfer adalah kebohongan yang bikin panik. Selain itu, hormati juga EXPIRED dari
+  // backend walau timer klien belum habis (jam klien bisa mundur).
+  const isPaid = order?.paymentStatus === "PAID";
+  const isExpired =
+    Boolean(order) &&
+    !isTerminal &&
+    !isPaid &&
+    (order!.paymentStatus === "EXPIRED" || secondsLeft <= 0);
 
   const payMutation = useMutation({
     mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) => payMintOrder(id, vars),
@@ -162,10 +211,18 @@ export function useCheckout(id: string) {
 
   return {
     order,
-    // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan).
-    isLoading: waitingForExchange || query.isLoading,
-    isError: query.isError,
-    isUnauthorized,
+    // Exchange in-flight juga = "memuat" (GET mint belum boleh jalan). Id yang bentuknya sudah
+    // salah tak perlu spinner: jawabannya sudah pasti sebelum jaringan menjawab.
+    isLoading: !malformedId && (waitingForExchange || query.isLoading),
+    isError: query.isError || malformedId,
+    // Kenapa gagal — halaman memilih layar dari sini, bukan menebak (B5/B14).
+    errorKind: errorKindOf(query.error, malformedId),
+    isUnauthorized: isUnauthorized && !malformedId,
+    // Muat ulang pesanan tanpa reload halaman. Dipakai layar "gangguan sementara".
+    retry: () => {
+      void query.refetch();
+    },
+    isRetrying: query.isFetching,
     pay: (channel: PaymentChannel, bank?: VaBank | null) =>
       payMutation.mutateAsync({ channel, bank }),
     isPaying: payMutation.isPending,
@@ -173,5 +230,6 @@ export function useCheckout(id: string) {
     secondsLeft,
     isExpired,
     isTerminal,
+    deadlineExtended,
   };
 }

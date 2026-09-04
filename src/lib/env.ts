@@ -11,17 +11,11 @@
 // - `appUrl` — URL `app` consumer untuk redirect balik saat sesi tak valid (code
 //   handoff invalid/kedaluwarsa/terpakai, atau token sesi 401). Diisi per environment
 //   (Netlify). Kalau kosong → fallback `router.back()` (mis. localhost dev).
-//
-// - `demoAutocomplete` — DEMO only (dev/preview): simulasikan status tracker maju ke
-//   "Selesai" setelah bayar (pipeline on-chain real belum jalan di dev). Display-only;
-//   nyala bila `NEXT_PUBLIC_DEMO_AUTOCOMPLETE="true"`. WAJIB OFF di prod.
 
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
-const demoAutocomplete = process.env.NEXT_PUBLIC_DEMO_AUTOCOMPLETE === "true";
 
 export const env = {
   apiBaseUrl,
   appUrl,
-  demoAutocomplete,
 } as const;
