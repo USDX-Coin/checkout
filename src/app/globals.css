@@ -41,6 +41,23 @@
   --success: #16a34a;
   --warning: #d97706;
 
+  /*
+   * ── Warna TEKS, terpisah dari warna PERMUKAAN ────────────────────────────
+   * Sama persis dengan repo `app` — dua repo, satu design system. Nilai di atas
+   * dipakai sebagai fill (pill, ikon, tint) dan di situ rasionya memang tidak
+   * perlu 4,5:1. Begitu dipakai untuk teks, semuanya gagal WCAG AA.
+   * Rasio dihitung di #ffffff (terang) dan #1a1a1a (gelap).
+   */
+  --primary-text: #800000;      /* 10,95:1 · judul & tautan brand   */
+  --focus-ring: #800000;        /* 10,95:1 · ring fokus 3 px @50%   */
+  --destructive-text: #dc2626;  /*  4,83:1 · pesan error            */
+  --success-text: #15803d;      /*  5,02:1 · status berhasil        */
+  --warning-text: #b45309;      /*  5,02:1 · countdown < 5 menit    */
+  --info: #0369a1;              /* permukaan notice biru            */
+  --info-text: #0369a1;         /*  5,93:1 · status menunggu        */
+  --muted-text: #6b6b6b;        /*  4,76:1 · label sekunder         */
+  --on-gold: #1a1a1a;           /*  8,33:1 di atas gold             */
+
   color-scheme: light;
 }
 
@@ -77,7 +94,48 @@
   --success: #22c55e;
   --warning: #f59e0b;
 
+  /*
+   * Maroon `--primary` #800000 hanya 1,59:1 di atas kartu gelap #1a1a1a —
+   * tautan tx hash di layar "Mint Berhasil" praktis tidak terbaca. Teks brand
+   * memakai nilai yang diterangkan; fill tetap `--primary`.
+   */
+  --primary-text: #d65f5f;      /* 4,69:1 */
+  --focus-ring: #d65f5f;        /* 4,69:1 · menggantikan --ring 2,28:1 */
+  --destructive-text: #f87171;  /* 6,29:1 */
+  --success-text: #22c55e;      /* 7,64:1 */
+  --warning-text: #f59e0b;      /* 8,10:1 */
+  --info: #7dd3fc;
+  --info-text: #7dd3fc;         /* 10,44:1 */
+  --muted-text: #9a9a9a;        /* 6,19:1 */
+  --on-gold: #1a1a1a;           /* 8,33:1 di atas gold */
+
   color-scheme: dark;
+}
+
+/*
+ * ── Motion ────────────────────────────────────────────────────────────────
+ * Token yang sama persis dengan repo `app`. Tailwind v4 punya namespace
+ * `--ease-*` di `@theme` tapi TIDAK punya `--duration-*`, jadi durasi hidup
+ * sebagai custom property dan dipakai lewat `duration-(--dur-3)`.
+ *
+ * Aturannya: keluar selalu lebih cepat daripada masuk.
+ */
+:root {
+  --dur-1: 90ms;   /* umpan balik: hover, ring fokus, tekan tombol   */
+  --dur-2: 150ms;  /* keluar: menu, tooltip, toast, pesan error      */
+  --dur-3: 220ms;  /* masuk: menu, popover, error, skeleton→konten   */
+  --dur-4: 320ms;  /* permukaan: dialog, sheet, ganti fase countdown */
+  --dur-5: 600ms;  /* sekali jalan: ceklis sukses, bilah progres     */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --dur-5: 0ms;
+  }
 }
 
 /* Map flipping CSS vars onto Tailwind color utilities (theme-aware) */
@@ -110,6 +168,17 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+
+  /* Warna teks — pakai ini untuk apa pun yang dibaca, bukan yang diisi. */
+  --color-primary-text: var(--primary-text);
+  --color-focus-ring: var(--focus-ring);
+  --color-destructive-text: var(--destructive-text);
+  --color-success-text: var(--success-text);
+  --color-warning-text: var(--warning-text);
+  --color-info: var(--info);
+  --color-info-text: var(--info-text);
+  --color-muted-text: var(--muted-text);
+  --color-on-gold: var(--on-gold);
 }
 
 /* Static brand ramp (maroon). 600–700 = the on-brand interactive shades. */
@@ -134,6 +203,15 @@
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
+
+  /*
+   * Easing — sama persis dengan repo `app`. `standard` untuk perubahan di
+   * tempat (warna, tinggi), `enter` mendarat pelan, `exit` langsung berangkat.
+   * Tidak ada yang memantul: ini halaman pembayaran.
+   */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 }
 
 @layer base {
