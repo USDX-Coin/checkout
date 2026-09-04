@@ -20,6 +20,11 @@ import type { MintOrderDetail } from "@/types";
 //      sudah pernah kami punya di cookie desk.
 //
 // Berkas ini menutup dua celah itu.
+//
+// Catatan 4 Sep 2026 (audit UI): fixture `orderId` di sini diganti dari "ord_1" jadi UUID.
+// Bukan kosmetik — sejak temuan B14, `useCheckout` membedakan orderId yang BENTUKNYA salah
+// (kontraknya `format: uuid`) dari kegagalan server, dan id salah bentuk sengaja tidak ikut
+// redirect ke `app`. Fixture lama akan menguji jalur yang salah, bukan jalur aplikasi.
 
 vi.mock("@/lib/auth/redirect", () => ({ redirectToApp: vi.fn(), returnToApp: vi.fn(() => true) }));
 import { redirectToApp } from "@/lib/auth/redirect";
@@ -37,7 +42,7 @@ function jsonResponse(status: number, payload: unknown): Response {
 
 function makeOrder(o: Partial<MintOrderDetail> = {}): MintOrderDetail {
   return {
-    id: "ord_1",
+    id: "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012",
     orderNumber: "USDX-1",
     customerName: "Siti",
     type: "MINT",
@@ -75,7 +80,7 @@ function makeOrder(o: Partial<MintOrderDetail> = {}): MintOrderDetail {
 }
 
 const PARTNER_SESSION_JSON = JSON.stringify({
-  orderId: "ord_1",
+  orderId: "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012",
   model: "NEUTRAL",
   status: "OPENED",
   sessionToken: "psess-partner",
@@ -93,7 +98,7 @@ beforeEach(() => {
   vi.mocked(redirectToApp).mockReset();
   sessionStorage.clear();
   localStorage.clear();
-  window.history.replaceState(null, "", "/checkout/ord_1");
+  window.history.replaceState(null, "", "/checkout/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
 });
 
 afterEach(() => {
@@ -112,11 +117,11 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       setToken("app-session-token");
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await getMintOrder("ord_1");
+      await getMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
 
       expect(authOf()).toBe("Bearer app-session-token");
       const [url, init] = fetchMock.mock.calls[0];
-      expect(String(url)).toContain("/api/v2/mint/ord_1");
+      expect(String(url)).toContain("/api/v2/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
       expect(init.method).toBe("GET");
     });
 
@@ -124,11 +129,11 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       setToken("app-session-token");
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await payMintOrder("ord_1", { channel: "VA", bank: "BCA" });
+      await payMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012", { channel: "VA", bank: "BCA" });
 
       expect(authOf()).toBe("Bearer app-session-token");
       const [url, init] = fetchMock.mock.calls[0];
-      expect(String(url)).toContain("/api/v2/mint/ord_1/pay");
+      expect(String(url)).toContain("/api/v2/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012/pay");
       expect(JSON.parse(init.body)).toEqual({ channel: "VA", bank: "BCA" });
     });
 
@@ -136,7 +141,7 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       setToken("app-session-token");
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await payMintOrder("ord_1", { channel: "QRIS" });
+      await payMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012", { channel: "QRIS" });
 
       expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ channel: "QRIS" });
     });
@@ -146,7 +151,7 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
     test("tanpa token aplikasi & tanpa bearer → TIDAK ada header Authorization (seperti sebelumnya)", async () => {
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await getMintOrder("ord_1");
+      await getMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
 
       expect(authOf()).toBeNull();
     });
@@ -155,7 +160,7 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       setToken("app-session-token");
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await getMintOrder("ord_1", "psess-partner");
+      await getMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012", "psess-partner");
 
       expect(authOf()).toBe("Bearer psess-partner");
       expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("app-session-token");
@@ -167,7 +172,7 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       setToken("app-session-token");
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await getMintOrder("ord_1", "");
+      await getMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012", "");
 
       expect(authOf()).toBe("Bearer app-session-token");
     });
@@ -177,7 +182,7 @@ describe("getMintOrder / payMintOrder — argumen bearer baru tidak mengubah jal
       sessionStorage.setItem(PARTNER_SESSION_KEY, PARTNER_SESSION_JSON);
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      await getMintOrder("ord_1");
+      await getMintOrder("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
 
       expect(authOf()).toBe("Bearer app-session-token");
       expect(authOf()).not.toContain("psess-partner");
@@ -192,7 +197,7 @@ describe("useCheckout — perilaku jalur aplikasi tetap seperti sebelumnya", () 
       sessionStorage.setItem(PARTNER_SESSION_KEY, PARTNER_SESSION_JSON);
       fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
 
-      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       expect(authOf()).toBe("Bearer app-session-token");
@@ -211,7 +216,7 @@ describe("useCheckout — perilaku jalur aplikasi tetap seperti sebelumnya", () 
         }),
       );
 
-      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await vi.advanceTimersByTimeAsync(50);
       expect(result.current.order).not.toBeNull();
       const afterFirst = fetchMock.mock.calls.length;
@@ -228,7 +233,7 @@ describe("useCheckout — perilaku jalur aplikasi tetap seperti sebelumnya", () 
         jsonResponse(401, { status: "error", error: { code: "UNAUTHORIZED", message: "no" } }),
       );
 
-      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isUnauthorized).toBe(true));
       expect(vi.mocked(redirectToApp)).toHaveBeenCalled();
     });
@@ -239,7 +244,7 @@ describe("useCheckout — perilaku jalur aplikasi tetap seperti sebelumnya", () 
         jsonResponse(404, { status: "error", error: { code: "NOT_FOUND", message: "no" } }),
       );
 
-      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.isUnauthorized).toBe(false);
       expect(vi.mocked(redirectToApp)).not.toHaveBeenCalled();
@@ -257,11 +262,11 @@ describe("useCheckout — perilaku jalur aplikasi tetap seperti sebelumnya", () 
         ),
       );
 
-      const { result } = renderHook(() => useCheckout("ord_1"), { wrapper: createWrapper() });
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       const mintCall = fetchMock.mock.calls.findIndex(([url]) =>
-        String(url).includes("/api/v2/mint/ord_1"),
+        String(url).includes("/api/v2/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
       );
       expect(new Headers(fetchMock.mock.calls[mintCall][1].headers).get("Authorization")).toBe(
         "Bearer sess-exchanged",

@@ -12,6 +12,7 @@
 // karena persis itulah yang mengubahnya jadi pengalih terbuka.
 
 import { ArrowRight, CheckCircle2, Clock, RefreshCw, XCircle } from "lucide-react";
+import { PartnerBrandButton, PartnerGhostButton } from "./PartnerUi";
 
 export type HeroTone = "success" | "review" | "failure";
 
@@ -70,18 +71,12 @@ export function PartnerStatusScreen({
       {children}
 
       <div className="mt-auto flex flex-col gap-2.5 pt-4">
+        {/* Dua primitif yang sama dengan layar partner lainnya (`PartnerUi`), bukan salinan
+            gayanya — di situlah cincin fokus keyboard dan warna partner sudah diselesaikan. */}
         {primaryAction && (
-          <button
-            type="button"
-            onClick={primaryAction.onClick}
-            style={{
-              backgroundColor: "var(--partner-brand)",
-              color: "var(--partner-brand-text)",
-            }}
-            className="flex h-12 w-full items-center justify-center rounded-xl border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90"
-          >
+          <PartnerBrandButton onClick={primaryAction.onClick}>
             {primaryAction.label}
-          </button>
+          </PartnerBrandButton>
         )}
 
         {returnUrl ? (
@@ -100,7 +95,7 @@ export function PartnerStatusScreen({
             }
             className={
               primaryAction
-                ? "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                ? "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-control hover:bg-accent"
                 : "flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-foreground/15 text-sm font-semibold transition-opacity hover:opacity-90"
             }
           >
@@ -112,14 +107,10 @@ export function PartnerStatusScreen({
         )}
 
         {secondary && (
-          <button
-            type="button"
-            onClick={secondary.onClick}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            {secondary.icon === "refresh" && <RefreshCw className="size-4" />}
+          <PartnerGhostButton onClick={secondary.onClick}>
+            {secondary.icon === "refresh" && <RefreshCw />}
             {secondary.label}
-          </button>
+          </PartnerGhostButton>
         )}
       </div>
     </>

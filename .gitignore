@@ -30,3 +30,6 @@ yarn-error.log*
 
 # netlify
 .netlify
+
+# SoT (repo terpisah, di-clone lokal untuk rujukan kontrak API)
+sot/

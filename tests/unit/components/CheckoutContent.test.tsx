@@ -12,7 +12,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const mockBack = vi.fn();
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ orderId: "ord_1" }),
+  useParams: () => ({ orderId: "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012" }),
   useRouter: () => ({ back: mockBack, push: vi.fn(), replace: vi.fn() }),
 }));
 
@@ -26,7 +26,7 @@ import { CheckoutContent } from "@/components/checkout/CheckoutContent";
 
 function makeOrder(o: Partial<MintOrderDetail> = {}): MintOrderDetail {
   return {
-    id: "ord_1",
+    id: "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012",
     orderNumber: "USDX-1",
     customerName: "Demo",
     type: "MINT",
@@ -81,29 +81,43 @@ const SELESAI = makeOrder({
   paidAt: "2026-08-13T14:03:44Z",
 });
 
+const mockRetry = vi.fn();
+
 function renderWith(order: MintOrderDetail | null, over: Record<string, unknown> = {}) {
   mockUseCheckout.mockReturnValue({
     order,
     isLoading: false,
     isError: false,
+    errorKind: "unavailable",
     isUnauthorized: false,
+    retry: mockRetry,
+    isRetrying: false,
     pay: vi.fn(),
     isPaying: false,
     payError: null,
     secondsLeft: 900,
     isExpired: false,
     isTerminal: false,
+    deadlineExtended: false,
     ...over,
   });
   return render(<CheckoutContent />);
 }
 
 const BANNER = /Mode simulasi: pembayaran tidak diproses ke bank sungguhan/;
-const TAGIHAN = /Jumlah yang harus dibayar/;
+// "Tagihan" = blok instruksi yang MENYURUH transfer nominal persis. Penandanya peringatan
+// underpaid/overpaid di bawah nominalnya — bukan lagi label angkanya: sejak temuan D5 label itu
+// diseragamkan jadi "Total bayar" dan dipakai bersama oleh ringkasan, rincian biaya, dan blok
+// instruksi, jadi label bukan lagi pembeda antara "menagih" dan "melaporkan".
+const TAGIHAN = /Kurang atau lebih akan ditandai/;
+// Countdown kini bernama sesuai tenggat yang dihitungnya (temuan F2): batas memilih metode
+// sebelum /pay, batas berlakunya VA/QRIS sesudahnya.
+const COUNTDOWN = /Batas (bayar|memilih)/;
 
 beforeEach(() => {
   mockUseCheckout.mockReset();
   mockBack.mockReset();
+  mockRetry.mockReset();
   mockReturnToApp.mockReset();
   mockReturnToApp.mockReturnValue(true);
 });
@@ -151,7 +165,7 @@ describe("keadaan: belum bayar", () => {
       renderWith(BELUM_BAYAR);
       expect(screen.getByText("8878 4716 9037 8849")).toBeInTheDocument();
       expect(screen.getByText(TAGIHAN)).toBeInTheDocument();
-      expect(screen.getByText(/Pembayaran berakhir dalam/)).toBeInTheDocument();
+      expect(screen.getByText(COUNTDOWN)).toBeInTheDocument();
     });
   });
 });
@@ -179,16 +193,16 @@ describe("keadaan: sudah bayar / menunggu approval (Tugas 6 poin 2, 3, 4)", () =
   });
 
   describe("negative", () => {
-    test("TIDAK ada lagi 'Jumlah yang harus dibayar' maupun perintah transfer persis", () => {
+    test("TIDAK ada lagi tagihan maupun perintah transfer persis", () => {
       renderWith(SUDAH_BAYAR);
       expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
       expect(screen.queryByText(/Transfer nominal/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Cara pembayaran/)).not.toBeInTheDocument();
     });
 
-    test("countdown 'Pembayaran berakhir dalam' tidak tampil setelah lunas", () => {
+    test("countdown tidak tampil setelah lunas", () => {
       renderWith(SUDAH_BAYAR);
-      expect(screen.queryByText(/Pembayaran berakhir dalam/)).not.toBeInTheDocument();
+      expect(screen.queryByText(COUNTDOWN)).not.toBeInTheDocument();
     });
   });
 
@@ -240,7 +254,7 @@ describe("penamaan angka (Tugas 6 poin 5)", () => {
     test("dua angka punya nama berbeda + rincian biaya bisa dibuka", () => {
       renderWith(BELUM_BAYAR);
       expect(screen.getByText("Nilai pesanan")).toBeInTheDocument();
-      expect(screen.getAllByText("Total yang dibayar").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Total bayar").length).toBeGreaterThan(0);
       expect(screen.getByText("Rincian biaya")).toBeInTheDocument();
       // Rincian memecah komponennya, bukan mengulang label ringkasan.
       expect(screen.getByText("Nilai USDX")).toBeInTheDocument();
@@ -267,7 +281,7 @@ describe("penamaan angka (Tugas 6 poin 5)", () => {
         makeOrder({ paymentStatus: "REQUESTED", totalPayIdr: null, pgFeeIdr: null, channels: [] }),
       );
       expect(screen.getByText("Nilai pesanan")).toBeInTheDocument();
-      expect(screen.queryByText("Total yang dibayar")).not.toBeInTheDocument();
+      expect(screen.queryByText("Total bayar")).not.toBeInTheDocument();
       expect(screen.queryByText("Rincian biaya")).not.toBeInTheDocument();
     });
   });
@@ -320,12 +334,17 @@ describe("order mati: EXPIRED/FAILED dari backend tidak boleh menampilkan tagiha
 
     test("countdown tidak tampil untuk order mati", () => {
       renderWith(MATI_BACKEND, { isExpired: false });
-      expect(screen.queryByText(/Pembayaran berakhir dalam/)).not.toBeInTheDocument();
+      expect(screen.queryByText(COUNTDOWN)).not.toBeInTheDocument();
     });
   });
 });
 
-describe("PAID + FAILED tidak boleh menjanjikan 'sedang diproses'", () => {
+// ── Temuan audit B4 · layar paling berbahaya ────────────────────────────────────────────────
+// Sebelum perbaikan ini, PAID + FAILED memakai layar yang SAMA dengan pesanan sehat: blok hijau,
+// judul "Pembayaran diterima", ikon centang — hanya satu kalimat kecil di bawahnya yang berbeda.
+// Judul dan warna yang dibaca orang, bukan kalimat keempat. Ekspektasi tes lama ("tetap tampil
+// 'Pembayaran diterima'") memang harus berubah: itulah bug-nya, bukan jaminannya.
+describe("PAID + FAILED punya layarnya sendiri, bukan layar pesanan sehat (B4)", () => {
   const BAYAR_LALU_GAGAL = makeOrder({
     ...SUDAH_BAYAR,
     status: "FAILED",
@@ -333,22 +352,106 @@ describe("PAID + FAILED tidak boleh menjanjikan 'sedang diproses'", () => {
   });
 
   describe("positive", () => {
-    test("uang tetap diakui diterima (jangan bikin user kira uangnya hangus)", () => {
+    test("judul menyebut yang gagal, dan uangnya tetap diakui diterima", () => {
       renderWith(BAYAR_LALU_GAGAL);
-      expect(screen.getByText("Pembayaran diterima")).toBeInTheDocument();
-      expect(screen.getByText(/Transaksi gagal/)).toBeInTheDocument();
+      expect(screen.getByText("Pengiriman USDX gagal")).toBeInTheDocument();
+      expect(screen.getByText("Rp 166.500 sudah diterima")).toBeInTheDocument();
+      expect(screen.getByText(/tercatat di pesanan ini/)).toBeInTheDocument();
+    });
+
+    test("melarang transfer ulang secara eksplisit", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.getByText("Jangan transfer lagi.")).toBeInTheDocument();
+    });
+
+    test("nomor pesanan tersedia sebagai rujukan yang bisa disalin", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      // Dua tempat: blok rujukan di layar, dan accordion "Detail pembayaran".
+      expect(screen.getAllByText("Nomor pesanan").length).toBeGreaterThan(0);
+      expect(screen.getByLabelText("Salin nomor pesanan")).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("Salin nomor pesanan"));
     });
   });
 
   describe("negative", () => {
-    test("TIDAK bilang 'sedang diproses' tepat di atas banner gagal", () => {
+    test("TIDAK memakai judul & nada pesanan sehat", () => {
       renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.queryByText("Pembayaran diterima")).not.toBeInTheDocument();
       expect(screen.queryByText(/sedang diproses/)).not.toBeInTheDocument();
+    });
+
+    // Keputusan sadar (lihat catatan di `@/lib/checkout/copy`): desain Figma `50` blok C
+    // menggambar tombol "Hubungi dukungan", tapi salurannya belum ada di kode.
+    test("TIDAK menjanjikan saluran dukungan yang belum ada", () => {
+      renderWith(BAYAR_LALU_GAGAL);
+      expect(screen.queryByText(/[Hh]ubungi dukungan/)).not.toBeInTheDocument();
     });
 
     test("tetap tanpa tagihan", () => {
       renderWith(BAYAR_LALU_GAGAL);
       expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+    });
+  });
+
+  // KOREKSI. Tes ini dulu berbunyi "HELD + FAILED tetap ke layar sedang ditinjau", dengan alasan
+  // "nominalnya tidak pernah cocok". Alasan itu SALAH menurut SoT, dan tesnya mengunci bug:
+  // `sot/conventions.md § Status Enums` ("Ops resolve HELD → reject (FAILED)") dan
+  // `sot/bni-integration.md §6` menyatakan ops yang MENOLAK menulis `status=FAILED` sementara
+  // `payment_status` TETAP `HELD` — reviewnya sudah SELESAI, hasilnya tolak, dan refund IDR-nya
+  // manual. Layar "Tim kami sedang memeriksanya" untuk keadaan itu salah waktu dan salah nasib.
+  describe("HELD + FAILED · ops menolak kredit, refund manual", () => {
+    const DITOLAK_OPS = makeOrder({
+      ...SUDAH_BAYAR,
+      paymentStatus: "HELD",
+      status: "FAILED",
+      safeStatus: "NONE",
+    });
+
+    describe("positive", () => {
+      test("layar gagal, dan pengembalian dana dikatakan apa adanya: manual, tidak instan", () => {
+        renderWith(DITOLAK_OPS);
+        expect(screen.getByText("Pesanan gagal, dana dikembalikan")).toBeInTheDocument();
+        expect(screen.getByText(/diproses manual oleh tim kami, bukan otomatis/)).toBeInTheDocument();
+        expect(screen.getByText("Jangan transfer lagi.")).toBeInTheDocument();
+      });
+
+      test("tracker menandai langkah PEMBAYARAN yang gagal — bukan langkah on-chain", () => {
+        renderWith(DITOLAK_OPS);
+        expect(screen.getByText("Pembayaran").className).toContain("text-destructive-text");
+        expect(screen.getByText(/Pembayaran ditolak saat ditinjau/)).toBeInTheDocument();
+      });
+
+      test("nomor pesanan tersedia sebagai rujukan untuk menagih refund", () => {
+        renderWith(DITOLAK_OPS);
+        expect(screen.getByLabelText("Salin nomor pesanan")).toBeInTheDocument();
+      });
+    });
+
+    describe("negative", () => {
+      test("TIDAK lagi bilang sedang ditinjau — reviewnya sudah selesai dan hasilnya tolak", () => {
+        renderWith(DITOLAK_OPS);
+        expect(screen.queryByText("Pembayaran sedang ditinjau")).not.toBeInTheDocument();
+        expect(screen.queryByText(/sedang memeriksanya/)).not.toBeInTheDocument();
+      });
+
+      test("TIDAK mengklaim nominal diterima — jumlah yang masuk memang tak dikirim ke FE", () => {
+        renderWith(DITOLAK_OPS);
+        expect(screen.queryByText(/sudah diterima/)).not.toBeInTheDocument();
+      });
+    });
+
+    describe("edge cases", () => {
+      test("HELD MURNI (belum diputus ops) tetap layar tinjau — dan berbeda dari yang ditolak", () => {
+        renderWith(makeOrder({ ...SUDAH_BAYAR, paymentStatus: "HELD", status: "HELD" }));
+        expect(screen.getByText("Pembayaran sedang ditinjau")).toBeInTheDocument();
+        expect(screen.queryByText("Pesanan gagal, dana dikembalikan")).not.toBeInTheDocument();
+      });
+
+      test("PAID + FAILED tetap memakai kalimatnya sendiri, bukan kalimat refund", () => {
+        renderWith(BAYAR_LALU_GAGAL);
+        expect(screen.getByText("Pengiriman USDX gagal")).toBeInTheDocument();
+        expect(screen.queryByText(/dikembalikan manual/)).not.toBeInTheDocument();
+      });
     });
   });
 });
@@ -381,7 +484,7 @@ describe("HELD: uang sudah masuk tapi ditahan untuk ditinjau", () => {
       renderWith(DITAHAN);
       expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
       expect(screen.queryByText(/Transfer nominal/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Pembayaran berakhir dalam/)).not.toBeInTheDocument();
+      expect(screen.queryByText(COUNTDOWN)).not.toBeInTheDocument();
     });
 
     test("TIDAK mengaku 'Pembayaran diterima' — nominalnya justru belum cocok", () => {
@@ -550,6 +653,154 @@ describe("keluar dari checkout memuat app dari awal, bukan mundur di riwayat", (
       keluarDari(SUDAH_BAYAR);
       expect(mockReturnToApp).toHaveBeenCalledTimes(1);
       expect(mockBack).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+// ── Temuan audit B5 & B14 · gagal memuat pesanan ────────────────────────────────────────────
+// Dulu 404, 500, jaringan mati, dan URL salah ketik sama-sama berbunyi "Pesanan tidak ditemukan
+// atau sesi tidak valid", tanpa satu tombol pun. Untuk 500 kalimat itu menyuruh user menyerah
+// atas pesanan yang mungkin ada — dan uangnya mungkin sudah bergerak.
+describe("gagal memuat: sebabnya menentukan apa yang boleh dikatakan (B5, B14)", () => {
+  describe("positive", () => {
+    test("gangguan server/jaringan → 'Gagal memuat pesanan' + tombol Coba lagi yang benar-benar memuat ulang", () => {
+      renderWith(null, { isError: true, errorKind: "unavailable" });
+      expect(screen.getByText("Gagal memuat pesanan")).toBeInTheDocument();
+      expect(screen.getByText(/tidak terpengaruh/)).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Coba lagi"));
+      expect(mockRetry).toHaveBeenCalledTimes(1);
+    });
+
+    test("404 → 'Pesanan tidak ditemukan' + jalan ke Riwayat, TANPA tombol coba lagi", () => {
+      renderWith(null, { isError: true, errorKind: "not-found" });
+      expect(screen.getByText("Pesanan tidak ditemukan")).toBeInTheDocument();
+      expect(screen.getByText("Buka Riwayat di app")).toBeInTheDocument();
+      expect(screen.queryByText("Coba lagi")).not.toBeInTheDocument();
+    });
+
+    test("orderId ngawur → 'Nomor pesanan tidak valid', bukan pesan 'tidak ditemukan'", () => {
+      renderWith(null, { isError: true, errorKind: "malformed-id" });
+      expect(screen.getByText("Nomor pesanan tidak valid")).toBeInTheDocument();
+      expect(screen.queryByText("Pesanan tidak ditemukan")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("gangguan sementara TIDAK boleh mengaku pesanannya tidak ada", () => {
+      renderWith(null, { isError: true, errorKind: "unavailable" });
+      expect(screen.queryByText(/tidak ditemukan/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("sedang memuat ulang → tombolnya terkunci supaya tidak ditekan berkali-kali", () => {
+      renderWith(null, { isError: true, errorKind: "unavailable", isRetrying: true });
+      expect(screen.getByText("Memuat…").closest("button")).toBeDisabled();
+    });
+  });
+});
+
+// ── Temuan audit F1 · layar VA punya jalan pulang ──────────────────────────────────────────
+describe("layar instruksi bayar punya jalan pulang (F1)", () => {
+  describe("positive", () => {
+    test("tombol kembali ke app + jaminan bahwa VA tidak hangus karena halaman ditutup", () => {
+      renderWith(BELUM_BAYAR);
+      const back = screen.getByText("Kembali ke app");
+      expect(back).toBeInTheDocument();
+      expect(screen.getByText(/VA tetap berlaku sampai waktu habis/)).toBeInTheDocument();
+      fireEvent.click(back);
+      expect(mockReturnToApp).toHaveBeenCalled();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("QRIS → kalimatnya menyebut QR, bukan VA", () => {
+      renderWith(makeOrder({ paymentChannel: "QRIS", paymentBank: null, virtualAccountNo: null }));
+      expect(screen.getByText(/QR ini tetap berlaku/)).toBeInTheDocument();
+    });
+  });
+});
+
+// ── Temuan audit F2 · dua tenggat, dua nama ─────────────────────────────────────────────────
+// Akarnya bukan pembulatan: `expiresAt` berganti ARTI setelah /pay (batas order → batas VA), di
+// slot tampilan yang sama dan dengan label yang sama.
+describe("countdown menyebut tenggat yang benar-benar dihitungnya (F2)", () => {
+  describe("positive", () => {
+    test("sebelum metode dipilih → 'Batas memilih metode'", () => {
+      renderWith(
+        makeOrder({
+          paymentStatus: "REQUESTED",
+          totalPayIdr: null,
+          pgFeeIdr: null,
+          channels: [{ channel: "VA", pgFeeIdr: "4000", banks: ["BCA"] }],
+        }),
+      );
+      expect(screen.getByText(/Batas memilih metode/)).toBeInTheDocument();
+    });
+
+    test("sesudah VA terbit → 'Batas bayar Virtual Account'", () => {
+      renderWith(BELUM_BAYAR);
+      expect(screen.getByText(/Batas bayar Virtual Account/)).toBeInTheDocument();
+    });
+
+    test("tenggat memanjang di tab ini → lompatannya diakui, bukan dibiarkan bikin panik", () => {
+      renderWith(BELUM_BAYAR, { deadlineExtended: true });
+      expect(screen.getByText("Waktu bayar diperpanjang untuk VA ini.")).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("tanpa perpanjangan yang tersaksikan → catatannya tidak muncul", () => {
+      renderWith(BELUM_BAYAR);
+      expect(screen.queryByText(/diperpanjang/)).not.toBeInTheDocument();
+    });
+  });
+});
+
+// ── Temuan validator no. 4 · status tak dikenal tidak boleh menagih ─────────────────────────
+// Cabang terakhir dulu adalah instruksi bayar, jadi enum baru dari backend (atau kombinasi yang
+// kontradiktif) mendarat di layar yang menyodorkan nomor VA, "Total bayar", dan countdown.
+describe("keadaan tak dikenal jatuh ke fallback yang aman, bukan ke tagihan", () => {
+  const TAK_DIKENAL = makeOrder({
+    // Nilai di luar enum yang dikenal FE — persis bentuk yang dihasilkan backend yang lebih baru.
+    paymentStatus: "SETTLING" as unknown as MintOrderDetail["paymentStatus"],
+    status: "SETTLING" as unknown as MintOrderDetail["status"],
+  });
+
+  describe("positive", () => {
+    test("mengaku tidak tahu, dan menyuruh berhenti transfer", () => {
+      renderWith(TAK_DIKENAL);
+      expect(screen.getByText("Status pesanan belum bisa ditampilkan")).toBeInTheDocument();
+      expect(screen.getByText(/Jangan transfer apa pun dulu/)).toBeInTheDocument();
+    });
+
+    test("tetap memberi nomor rujukan dan jalan keluar", () => {
+      renderWith(TAK_DIKENAL);
+      expect(screen.getByLabelText("Salin nomor pesanan")).toBeInTheDocument();
+      expect(screen.getByText("Buka Riwayat di app")).toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("TIDAK ada nomor VA, tagihan, maupun countdown", () => {
+      renderWith(TAK_DIKENAL);
+      expect(screen.queryByText("8878 4716 9037 8849")).not.toBeInTheDocument();
+      expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
+      expect(screen.queryByText(COUNTDOWN)).not.toBeInTheDocument();
+      expect(screen.queryByText("Cara pembayaran")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("EXPIRED + COMPLETED bukan 'Pesanan kedaluwarsa' — pesanannya justru sudah selesai", () => {
+      renderWith(makeOrder({ paymentStatus: "EXPIRED", status: "COMPLETED", onChainTxHash: null }));
+      expect(screen.queryByText("Pesanan kedaluwarsa.")).not.toBeInTheDocument();
+      expect(screen.getByText("Status pesanan belum bisa ditampilkan")).toBeInTheDocument();
+    });
+
+    test("EXPIRED + COMPLETED + tx terbukti → layar sukses, bukan fallback", () => {
+      renderWith(makeOrder({ paymentStatus: "EXPIRED", status: "COMPLETED", onChainTxHash: "0xd" }));
+      expect(screen.getByText("Mint Berhasil")).toBeInTheDocument();
     });
   });
 });
