@@ -14,6 +14,15 @@ export function formatIDR(value: number): string {
   }).format(value)}`;
 }
 
+// Jumlah token untuk dibaca manusia. Figma menulis "62,092307 USDX": koma desimal Indonesia,
+// tanpa nol berekor. `maximumFractionDigits: 6` mengikuti presisi yang dikirim backend; angka
+// bulat tetap tampil bulat ("250 USDX", bukan "250,000000 USDX").
+export function formatTokenAmount(value: string | number): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 6 }).format(n);
+}
+
 export function truncateAddress(address: string, chars = 4): string {
   if (address.length <= chars * 2 + 2) return address;
   return `${address.slice(0, chars + 2)}...${address.slice(-chars)}`;

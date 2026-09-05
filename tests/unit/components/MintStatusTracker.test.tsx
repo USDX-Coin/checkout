@@ -116,7 +116,9 @@ describe("MintStatusTracker", () => {
           order={makeOrder({ status: "FAILED", safeStatus: "REJECTED", paymentStatus: "PAID" })}
         />,
       );
-      const ikon = [...container.querySelectorAll("li > span")];
+      // `li > span` sekarang memuat DUA hal: garis penghubung antar-langkah dan ikonnya.
+      // Yang diuji ikonnya, jadi dipilih lewat slot-nya.
+      const ikon = [...container.querySelectorAll('li > span[data-slot="step-icon"]')];
       const selesai = ikon[0].className;
       const gagal = ikon[1].className;
       expect(selesai).toContain("bg-success");

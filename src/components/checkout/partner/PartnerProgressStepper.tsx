@@ -13,8 +13,7 @@
 // terisinya sekitar 19% — dua angka yang bertentangan di dalam satu komponen. Di sini lebar bilah
 // DIHITUNG dari langkahnya, jadi label dan bilah selalu sepakat. Lihat § Known Drift di PR.
 
-import { Check } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Steps, type StepItem } from "@/components/ui/steps";
 
 export type StepState = "done" | "active" | "idle";
 
@@ -24,6 +23,14 @@ export interface StepperStep {
   detail?: string | null;
   state: StepState;
 }
+
+// `idle` di jalur partner = `pending` di `ui/steps`. Namanya berbeda karena tipe partner sudah
+// dipakai `PartnerCheckout`; yang dipetakan cuma nilainya.
+const TO_STEP_STATE: Record<StepState, StepItem["state"]> = {
+  done: "done",
+  active: "active",
+  idle: "pending",
+};
 
 /** Nomor langkah yang sedang berjalan (1-based). Semua selesai → jumlah langkah. */
 function currentStep(steps: StepperStep[]): number {
@@ -69,55 +76,50 @@ export function PartnerProgressStepper({
         />
       </div>
 
-      <ol className="flex flex-col gap-3 pt-1">
-        {steps.map((s) => (
-          <li key={s.label} className="flex items-start gap-2.5">
-            <StepIcon state={s.state} />
-            <div className="flex min-w-0 flex-col gap-0.5">
+      <Steps
+        className="pt-1"
+        size="sm"
+        // Garis penghubung sengaja MATI di jalur partner: frame P04/N04 menggambar lingkaran
+        // lepas, dan halaman ini bermerek partner — menambah garis di sini adalah perubahan
+        // visual pada desain orang lain, bukan perbaikan checkout. Menyatukannya urusan PR
+        // yang memang menggarap halaman partner.
+        connector={false}
+        steps={steps.map((s) => ({
+          label: s.label,
+          state: TO_STEP_STATE[s.state],
+          detail: s.detail && s.state !== "idle" ? s.detail : null,
+        }))}
+        renderIcon={({ state, index }) => {
+          // Ikon "selesai" jatuh ke bawaan `ui/steps` — itu justru yang harus sama antar-jalur
+          // (temuan C8). Dua sisanya diambil alih karena memakai warna MEREK PARTNER, dan
+          // maroon USDX tidak boleh muncul di halaman bermerek orang lain.
+          if (state === "active")
+            return (
               <span
-                className={cn(
-                  "text-sm",
-                  s.state === "idle"
-                    ? "text-muted-foreground"
-                    : "font-semibold text-foreground",
-                )}
+                key={index}
+                data-slot="step-icon"
+                style={{ backgroundColor: "var(--partner-brand)" }}
+                className="relative z-10 flex size-5 shrink-0 items-center justify-center rounded-full"
               >
-                {s.label}
+                {/* `--partner-brand-text`, bukan putih: titik ini duduk di atas warna merek
+                    partner, dan partner yang mereknya terang membuat titik putih lenyap. */}
+                <span
+                  className="size-1.5 rounded-full"
+                  style={{ backgroundColor: "var(--partner-brand-text)" }}
+                />
               </span>
-              {s.detail && s.state !== "idle" && (
-                <span className="text-xs leading-relaxed text-muted-foreground">{s.detail}</span>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
+            );
+          if (state === "pending")
+            return (
+              <span
+                key={index}
+                data-slot="step-icon"
+                className="relative z-10 size-5 shrink-0 rounded-full border-2 border-border"
+              />
+            );
+          return null;
+        }}
+      />
     </div>
   );
-}
-
-function StepIcon({ state }: { state: StepState }) {
-  // Glif langkah selesai dilubangi dengan warna permukaan kartu, bukan putih: `--success` di tema gelap
-  // (#22c55e) terlalu terang untuk menampung centang putih (2,28:1). Sama dengan
-  // `MintStatusTracker`, supaya dua stepper di repo ini tidak berbeda diam-diam.
-  if (state === "done") {
-    return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-card">
-        <Check className="size-3" strokeWidth={3} />
-      </span>
-    );
-  }
-  if (state === "active") {
-    return (
-      <span
-        style={{ backgroundColor: "var(--partner-brand)" }}
-        className="flex size-5 shrink-0 items-center justify-center rounded-full"
-      >
-        {/* `--partner-brand-text`, bukan putih: titik ini duduk di atas warna merek
-            partner, dan partner yang mereknya terang membuat titik putih lenyap.
-            Token ini sudah dipasangkan dengan `--partner-brand` di PartnerShell. */}
-        <span className="size-1.5 rounded-full" style={{ backgroundColor: "var(--partner-brand-text)" }} />
-      </span>
-    );
-  }
-  return <span className="size-5 shrink-0 rounded-full border-2 border-border" />;
 }

@@ -109,4 +109,54 @@ export const CHECKOUT_COPY = {
   // Judul grup radio kedua (Figma `50` blok A, state A1b). Sekaligus nama grup yang dibacakan
   // pembaca layar lewat `aria-label`.
   chooseBankLabel: "Pilih bank",
+
+  // ── Pilih metode · bentuk Figma A1a/A1b (`2639:31770`, `2639:32156`) ───────────────────────
+  methodGroupLabel: "Metode pembayaran",
+  qrisDescription: "Bayar dengan scan QR",
+  // Dipakai hanya kalau `channels[].banks` kosong — daftar banknya sendiri yang biasanya jadi
+  // keterangan, karena itu yang menjawab "bisa transfer dari mana".
+  vaDescriptionFallback: "Transfer ke nomor Virtual Account",
+  payCta: "Bayar sekarang",
+  pickMethodHint: "Pilih metode pembayaran untuk lanjut.",
+  pickBankHint: "Pilih bank dulu untuk lanjut.",
+
+  // ── Tabel rincian biaya (Figma `kelompok ringkasan · 06f Opsi 3`) ──────────────────────────
+  lockedRateLabel: "Kurs terkunci",
+  perUsdx: (rate: string): string => `${rate} / USDX`,
+  usdxValueLabel: "Nilai USDX",
+  mintFeeLabel: "Biaya mint",
+  serviceFeeLabel: "Biaya layanan",
+  orderDetailsLabel: "Rincian pesanan",
+
+  // ── Baris ringkasan pesanan (Figma `pesanan`) ──────────────────────────────────────────────
+  // "Anda terima" ikut Figma apa adanya: ini nama kolom, bukan sapaan — jadi ia tidak
+  // bertabrakan dengan keputusan D6 yang memilih "kamu" untuk kalimat.
+  youReceiveLabel: "Anda terima",
+  walletLabel: "Wallet tujuan",
+  customerNameLabel: "Atas nama",
+  orderValueLabel: "Nilai pesanan",
+
+  // ── Instruksi bayar (Figma A2, `2610:19989`) ───────────────────────────────────────────────
+  vaNumberLabel: "Nomor Virtual Account",
+  copyVaAriaLabel: "Salin nomor Virtual Account",
+  copyTotalAriaLabel: "Salin total bayar",
+  copyTxAriaLabel: "Salin hash transaksi",
+  exactAmountWarning:
+    "Transfer nominal persis seperti di atas. Kurang atau lebih akan ditandai underpaid/overpaid dan mint ditahan untuk review.",
+  howToPayLabel: "Cara pembayaran",
+
+  // ── Layar sukses (Figma A4, `2610:20803`) ──────────────────────────────────────────────────
+  successHeading: "Mint berhasil",
+  successBody: (amount: string): string => `${amount} sudah dikirim ke wallet kamu.`,
+  txLabel: (chain: string): string => `Tx on-chain · ${chain}`,
+  viewOnExplorer: (explorer: string): string => `Lihat di ${explorer}`,
+
+  // ── Status badge di kepala kartu (Figma: ada di SETIAP state) ──────────────────────────────
+  statusPickMethod: "Pilih metode",
+  statusWaitingPayment: "Menunggu pembayaran",
+  statusPaid: "Sedang diproses",
+  statusHeld: "Sedang ditinjau",
+  statusCompleted: "Selesai",
+  statusFailed: "Gagal",
+  statusExpired: "Kedaluwarsa",
 } as const;

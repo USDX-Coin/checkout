@@ -34,10 +34,20 @@ import { useCheckout } from "@/hooks/useCheckout";
 import { returnToApp } from "@/lib/auth/redirect";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
+import { CopyField } from "@/components/ui/copy-field";
 import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { formatIDR, formatCountdown, formatWibDateTime, truncateAddress } from "@/lib/utils";
+import { LinkInline } from "@/components/ui/link-inline";
+import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  formatIDR,
+  formatCountdown,
+  formatTokenAmount,
+  formatWibDateTime,
+  truncateAddress,
+} from "@/lib/utils";
 import type { MintChannelOption, MintOrderDetail, PaymentChannel } from "@/types";
 
 // Kelompokkan digit per 4 biar nomor VA gampang dibaca (8878 4716 9037 8849).
@@ -59,8 +69,98 @@ function resolveChannels(order: MintOrderDetail): MintChannelOption[] {
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-5">
+    <div className="flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-5 min-[544px]:p-6">
       {children}
+    </div>
+  );
+}
+
+// Nama explorer per chain, untuk label tautan ("Lihat di Polygonscan").
+function explorerName(chain: string): string {
+  return chain === "polygon" ? "Polygonscan" : "block explorer";
+}
+
+// Nama chain untuk dibaca manusia. `order.chain` datang huruf kecil ("polygon"); Figma menulis
+// "Polygon" — itu nama jaringan, bukan kata benda biasa.
+function chainLabel(chain: string): string {
+  return chain.charAt(0).toUpperCase() + chain.slice(1);
+}
+
+/**
+ * Status pesanan sebagai satu kata di kepala kartu.
+ *
+ * Ada di SETIAP state Figma (`50 · Checkout`: A1 netral "Pilih metode", A2 peringatan
+ * "Menunggu pembayaran", A4 sukses "Selesai", C1 bahaya "Gagal") dan tidak ada satu pun di
+ * kode. Tanpa ia, satu-satunya cara tahu posisi pesanan adalah membaca seluruh kartu sampai
+ * ketemu blok yang menyala — dan blok itu ada di bawah lipatan pada layar instruksi.
+ *
+ * Label-nya dipilih di sini, bukan di `StatusBadge`: warnanya milik status (dan `STATUS_TONE`
+ * memang memetakannya sekali untuk seluruh repo), tapi kata-katanya milik layar ini.
+ */
+function orderStatusLabel(order: MintOrderDetail): { status: string; label: string } {
+  if (order.status === "COMPLETED")
+    return { status: "COMPLETED", label: CHECKOUT_COPY.statusCompleted };
+  if (order.status === "FAILED")
+    return {
+      status: "FAILED",
+      label:
+        order.paymentStatus === "EXPIRED"
+          ? CHECKOUT_COPY.statusExpired
+          : CHECKOUT_COPY.statusFailed,
+    };
+  if (order.paymentStatus === "EXPIRED")
+    return { status: "EXPIRED", label: CHECKOUT_COPY.statusExpired };
+  if (order.paymentStatus === "HELD") return { status: "HELD", label: CHECKOUT_COPY.statusHeld };
+  if (order.paymentStatus === "PAID") return { status: "PAID", label: CHECKOUT_COPY.statusPaid };
+  if (order.paymentStatus === "REQUESTED")
+    return { status: "REQUESTED", label: CHECKOUT_COPY.statusPickMethod };
+  return { status: "WAITING_FOR_PAYMENT", label: CHECKOUT_COPY.statusWaitingPayment };
+}
+
+/**
+ * Tiga baris identitas pesanan (Figma `pesanan`, h 96: tiga baris h 20 berjarak 8).
+ *
+ * Baris pertamanya "Anda terima" — jumlah USDX yang benar-benar didapat user. Sebelum ini
+ * angka itu TIDAK PERNAH muncul di halaman checkout sampai layar sukses: orang diminta
+ * mentransfer rupiah tanpa pernah melihat berapa token yang dia beli. Itu bukan detail
+ * kosmetik, itu isi transaksinya.
+ *
+ * Baris "Nilai pesanan" yang dulu ada di sini dihapus: angkanya kembali sebagai "Nilai USDX"
+ * di tabel rincian biaya (tempatnya di Figma), dan dua nama untuk satu angka persis temuan D5.
+ */
+function OrderIdentityRows({
+  order,
+  onCopy,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Row label={CHECKOUT_COPY.youReceiveLabel}>
+        {/* Koin 20 px mendahului angkanya (Figma `asset/usdx-coin · 20`). `usdx-coin.svg` —
+            BUKAN `Logo.svg`, yang logo lama dan tidak berlaku lagi. `aria-hidden` karena kata
+            "USDX" sudah tertulis persis di sebelahnya; membacakannya dua kali cuma bising. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/image/usdx-coin.svg" alt="" aria-hidden className="size-5 shrink-0" />
+        <span className="font-semibold">{formatTokenAmount(order.amount)} USDX</span>
+      </Row>
+      <Row label={CHECKOUT_COPY.walletLabel}>
+        <span className="font-mono text-xs">
+          {order.chain} · {truncateAddress(order.userAddress)}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onCopy(order.userAddress)}
+          aria-label="Salin alamat wallet"
+          className="text-muted-foreground"
+        >
+          <Copy />
+        </Button>
+      </Row>
+      <Row label={CHECKOUT_COPY.customerNameLabel}>{order.customerName}</Row>
     </div>
   );
 }
@@ -117,7 +217,17 @@ function Accordion({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-function QrisInstruction({ order }: { order: MintOrderDetail }) {
+function QrisInstruction({
+  order,
+  onCopy,
+  countdown,
+  extendedNote,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+  countdown: React.ReactNode;
+  extendedNote: string | null;
+}) {
   const wrapRef = useRef<HTMLDivElement>(null);
   function download() {
     const canvas = wrapRef.current?.querySelector("canvas");
@@ -128,118 +238,166 @@ function QrisInstruction({ order }: { order: MintOrderDetail }) {
     a.click();
   }
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-5 text-center">
-      <div className="flex items-center gap-2">
-        <span
-          className="flex size-7 items-center justify-center rounded-md"
-          style={{ backgroundColor: QRIS_RED }}
-        >
-          <QrCode className="size-4 text-white" />
+    // Panel yang sama dengan jalur VA — dua instrumen bayar, satu bentuk. Kepala panel juga
+    // sama: merek di kiri, sisa waktu di kanan.
+    <div className="@container/panel flex flex-col gap-3 rounded-xl bg-muted p-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <span className="flex items-center gap-2">
+          <span
+            className="flex size-6 items-center justify-center rounded"
+            style={{ backgroundColor: QRIS_RED }}
+          >
+            <QrCode className="size-4 text-white" />
+          </span>
+          <span className="text-sm font-medium text-foreground">QRIS</span>
         </span>
-        <span className="text-sm font-extrabold tracking-tight text-foreground">QRIS</span>
+        {countdown && (
+          <span className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
+            <Clock aria-hidden className="size-4" />
+            <span className="hidden @[22rem]/panel:inline">
+              {CHECKOUT_COPY.countdownAfterMethod(order.paymentChannel)}
+            </span>
+            <span className="font-semibold tabular-nums text-foreground">{countdown}</span>
+          </span>
+        )}
       </div>
-      <div ref={wrapRef} className="rounded-lg border border-border bg-white p-3">
-        <QRCodeCanvas value={order.paymentUrl ?? order.orderNumber} size={180} level="M" />
-      </div>
-      {order.totalPayIdr && (
-        <span className="text-lg font-semibold text-foreground">
-          {formatIDR(Number(order.totalPayIdr))}
-        </span>
+
+      {extendedNote && (
+        <Alert tone="info" shape="strip">
+          {extendedNote}
+        </Alert>
       )}
-      <span className="text-xs text-muted-foreground">
-        Scan QR ini di aplikasi bank / e-wallet kamu.
-      </span>
-      <Button type="button" variant="outline" size="sm" onClick={download}>
-        <Download /> Unduh QR Code
-      </Button>
+
+      <div className="flex flex-col items-center gap-3">
+        {/* Plat QR putih permanen di kedua tema: pemindai membaca kontras gelap-di-terang, dan
+            QR di atas latar gelap tidak terbaca sebagian pemindai. Literal, disengaja. */}
+        <div ref={wrapRef} className="rounded-lg bg-white p-3">
+          <QRCodeCanvas value={order.paymentUrl ?? order.orderNumber} size={180} level="M" />
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={download}>
+          <Download /> Unduh QR Code
+        </Button>
+      </div>
+
+      {order.totalPayIdr && (
+        <>
+          <CopyField
+            label={TOTAL_LABEL}
+            value={formatIDR(Number(order.totalPayIdr))}
+            copyValue={order.totalPayIdr}
+            onCopy={onCopy}
+            copyAriaLabel={CHECKOUT_COPY.copyTotalAriaLabel}
+          />
+          <Alert tone="warning">{CHECKOUT_COPY.exactAmountWarning}</Alert>
+        </>
+      )}
     </div>
   );
 }
 
+/**
+ * Instrumen bayar — nomor VA, total, dan semua yang menempel padanya.
+ *
+ * Figma A2 (`2610:19999`) membungkus keempatnya dalam SATU panel dalam ber-latar `muted`
+ * (w 464 · h 322 · padding 16 · jarak antar-anak 12), dan itu bukan hiasan: di layar ini ada
+ * dua kotak abu berdampingan (nomor VA dan total bayar) yang, tanpa panel, mengambang langsung
+ * di kartu putih bersama tiga hal lain yang bentuknya berbeda-beda. Panelnya yang menyatakan
+ * "ini satu instrumen pembayaran", dan countdown-nya masuk ke kepala panel karena yang
+ * kedaluwarsa memang instrumen itu — bukan halamannya.
+ */
 function PaymentInstructions({
   order,
   onCopy,
+  countdown,
+  extendedNote,
 }: {
   order: MintOrderDetail;
   onCopy: (text: string) => void;
+  countdown: React.ReactNode;
+  extendedNote: string | null;
 }) {
-  if (order.paymentChannel === "QRIS") return <QrisInstruction order={order} />;
+  if (order.paymentChannel === "QRIS")
+    return (
+      <QrisInstruction
+        order={order}
+        countdown={countdown}
+        extendedNote={extendedNote}
+        onCopy={onCopy}
+      />
+    );
 
   const bankBrand = order.paymentBank ? BANK_BRAND[order.paymentBank] : null;
   return (
-    <div className="flex flex-col gap-3">
-      {/* Logo bank sudah memuat nama banknya sendiri — menuliskannya lagi bikin "BCA BCA".
-          Nama tetap ada untuk pembaca layar lewat alt. Badge singkatan (tanpa logo) TIDAK
-          selalu terbaca ("MDR", "PRM"), jadi di jalur itu namanya tetap ditulis. */}
-      {order.paymentBank && bankBrand && (
-        <Row label="Virtual Account">
-          {bankBrand.logo ? (
+    <div className="@container/panel flex flex-col gap-3 rounded-xl bg-muted p-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        {/* Logo bank sudah memuat nama banknya sendiri — menuliskannya lagi bikin "BCA BCA".
+            Badge singkatan (tanpa logo) TIDAK selalu terbaca ("MDR", "PRM"), jadi di jalur itu
+            namanya tetap ditulis. */}
+        <span className="flex min-w-0 items-center gap-2">
+          {bankBrand?.logo ? (
             <span className="flex h-6 items-center justify-center rounded bg-white px-1.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={bankBrand.logo}
-                alt={order.paymentBank}
+                alt={order.paymentBank ?? ""}
                 className="max-h-4 w-auto object-contain"
               />
             </span>
-          ) : (
-            <>
-              <span
-                className="flex h-6 w-9 items-center justify-center rounded text-xs font-extrabold tracking-tight"
-                style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
-              >
-                {bankBrand.mark}
-              </span>
-              {order.paymentBank}
-            </>
-          )}
-        </Row>
-      )}
-
-      <div>
-        <p className="mb-1 text-xs text-muted-foreground">Nomor Virtual Account</p>
-        <div className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
-          <span className="font-mono text-base font-semibold tracking-wider text-foreground">
-            {order.virtualAccountNo ? groupDigits(order.virtualAccountNo) : "—"}
+          ) : bankBrand ? (
+            <span
+              className="flex h-6 w-9 items-center justify-center rounded text-xs font-extrabold tracking-tight"
+              style={{ backgroundColor: bankBrand.bg, color: bankBrand.fg }}
+            >
+              {bankBrand.mark}
+            </span>
+          ) : null}
+          {/* Figma menulis "Virtual Account BNI" DI SAMPING logonya (`2610:20001`), dan itu
+              bukan pengulangan: "Virtual Account BNI" nama produknya, logo cuma penanda merek. */}
+          <span className="truncate text-sm font-medium text-foreground">
+            Virtual Account{order.paymentBank ? ` ${order.paymentBank}` : ""}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => order.virtualAccountNo && onCopy(order.virtualAccountNo)}
-            aria-label="Salin"
-            className="text-muted-foreground"
-          >
-            <Copy />
-          </Button>
-        </div>
+        </span>
+        {countdown && (
+          <span className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
+            <Clock aria-hidden className="size-4" />
+            <span className="hidden @[22rem]/panel:inline">
+              {CHECKOUT_COPY.countdownAfterMethod(order.paymentChannel)}
+            </span>
+            <span className="font-semibold tabular-nums text-foreground">{countdown}</span>
+          </span>
+        )}
       </div>
 
+      {/* Lompatan angka countdown diakui, bukan disembunyikan — dan hanya kepada orang yang
+          benar-benar menyaksikannya di tab ini (F2). */}
+      {extendedNote && (
+        <Alert tone="info" shape="strip">
+          {extendedNote}
+        </Alert>
+      )}
+
+      <CopyField
+        label={CHECKOUT_COPY.vaNumberLabel}
+        value={order.virtualAccountNo ? groupDigits(order.virtualAccountNo) : "—"}
+        copyValue={order.virtualAccountNo ?? ""}
+        onCopy={onCopy}
+        copyAriaLabel={CHECKOUT_COPY.copyVaAriaLabel}
+        mono
+      />
+
       {order.totalPayIdr && (
-        <div>
-          {/* Satu nama untuk angka yang sama (D5). Ringkasan di atas menyembunyikan barisnya
-              selama layar ini tampil, jadi "Total bayar" hanya terbaca sekali. */}
-          <p className="mb-1 text-xs text-muted-foreground">{TOTAL_LABEL}</p>
-          <div className="flex items-center justify-between gap-2 rounded-lg bg-muted p-3">
-            <span className="text-base font-semibold text-foreground">
-              {formatIDR(Number(order.totalPayIdr))}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => order.totalPayIdr && onCopy(order.totalPayIdr)}
-              aria-label="Salin"
-              className="text-muted-foreground"
-            >
-              <Copy />
-            </Button>
-          </div>
-          <p className="mt-1.5 text-xs text-warning-text">
-            Transfer nominal <span className="font-semibold">persis</span> seperti di atas. Kurang
-            atau lebih akan ditandai underpaid/overpaid dan mint ditahan untuk review.
-          </p>
-        </div>
+        <>
+          {/* Satu nama untuk angka yang sama (D5). Ringkasan menyembunyikan barisnya selama
+              layar ini tampil, jadi "Total bayar" hanya terbaca sekali. */}
+          <CopyField
+            label={TOTAL_LABEL}
+            value={formatIDR(Number(order.totalPayIdr))}
+            copyValue={order.totalPayIdr}
+            onCopy={onCopy}
+            copyAriaLabel={CHECKOUT_COPY.copyTotalAriaLabel}
+          />
+          <Alert tone="warning">{CHECKOUT_COPY.exactAmountWarning}</Alert>
+        </>
       )}
     </div>
   );
@@ -307,10 +465,11 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 // ringkasan dan selisihnya (biaya layanan PG, plus kode unik pada provider yang memakainya)
 // harus bisa ditelusuri, bukan bikin user menebak. Sisa dihitung dari selisih supaya baris-
 // barisnya selalu menjumlah ke total yang benar-benar ditagih.
-function FeeBreakdown({ order }: { order: MintOrderDetail }) {
+function FeeRows({ order }: { order: MintOrderDetail }) {
   const subtotal = Number(order.subtotalIdr);
   const mintFee = Number(order.mintFeeIdr);
   const total = Number(order.totalPayIdr);
+  const rate = Number(order.effectiveRate);
   // pgFeeIdr null = biaya layanannya BELUM diketahui, bukan nol. Menampilkannya sebagai "Rp 0"
   // lalu melempar selisihnya ke baris "Kode unik" akan salah melabeli biaya PG — lebih baik
   // barisnya tidak ditampilkan sama sekali dan sisanya diberi label netral.
@@ -320,11 +479,18 @@ function FeeBreakdown({ order }: { order: MintOrderDetail }) {
   const residual = Math.round(total - subtotal - mintFee - pgFee);
 
   return (
-    <Accordion title="Rincian biaya">
-      <DetailRow label="Nilai USDX">{formatIDR(subtotal)}</DetailRow>
-      <DetailRow label={`Biaya mint (${order.mintFeePct}%)`}>{formatIDR(mintFee)}</DetailRow>
+    <div className="flex flex-col gap-2 pt-1">
+      {Number.isFinite(rate) && rate > 0 && (
+        <DetailRow label={CHECKOUT_COPY.lockedRateLabel}>
+          {CHECKOUT_COPY.perUsdx(formatIDR(rate))}
+        </DetailRow>
+      )}
+      <DetailRow label={CHECKOUT_COPY.usdxValueLabel}>{formatIDR(subtotal)}</DetailRow>
+      <DetailRow label={`${CHECKOUT_COPY.mintFeeLabel} (${order.mintFeePct}%)`}>
+        {formatIDR(mintFee)}
+      </DetailRow>
       {pgFeeKnown && (
-        <DetailRow label="Biaya layanan pembayaran">{formatIDR(pgFee)}</DetailRow>
+        <DetailRow label={CHECKOUT_COPY.serviceFeeLabel}>{formatIDR(pgFee)}</DetailRow>
       )}
       {/* Provider yang memakai kode unik (BNI) menempelkannya ke total — tanpa baris ini
           rincian tidak menjumlah ke angka yang benar-benar ditagih. Sisa NEGATIF mustahil
@@ -334,10 +500,13 @@ function FeeBreakdown({ order }: { order: MintOrderDetail }) {
           {formatIDR(residual)}
         </DetailRow>
       )}
-      <div className="mt-1 border-t border-border pt-1">
-        <DetailRow label={TOTAL_LABEL}>{formatIDR(total)}</DetailRow>
+      {/* Tanpa garis pemisah di atas baris total (Figma `kelompok ringkasan`): garis itu
+          memecah satu tabel jadi dua tabel kecil. Tebalnya yang menandai ia baris terakhir. */}
+      <div className="flex items-center justify-between gap-3 py-0.5 font-medium text-foreground">
+        <span>{TOTAL_LABEL}</span>
+        <span className="font-semibold">{formatIDR(total)}</span>
       </div>
-    </Accordion>
+    </div>
   );
 }
 
@@ -398,10 +567,14 @@ function PaidState({
   order,
   onCopy,
   onBack,
+  identity,
 }: {
   order: MintOrderDetail;
   onCopy: (text: string) => void;
   onBack: () => void;
+  /** Baris identitas pesanan. Figma menaruhnya SESUDAH hero: yang pertama dibaca di layar
+   *  hasil adalah hasilnya, bukan tiga baris data yang sama di setiap keadaan. */
+  identity: React.ReactNode;
 }) {
   // Mint yang gagal SETELAH uang masuk (multisig REJECTED) tidak lagi lewat sini: ia punya
   // layarnya sendiri, `FailedPaidState` (B4). Dulu keadaan itu ditampung di sini dengan satu
@@ -424,6 +597,8 @@ function PaidState({
           Tidak perlu transfer lagi. Pesanan kamu sedang diproses.
         </p>
       </div>
+
+      {identity}
 
       <MintStatusTracker order={order} />
 
@@ -495,10 +670,14 @@ function FailedPaidState({
   order,
   onCopy,
   onBack,
+  identity,
 }: {
   order: MintOrderDetail;
   onCopy: (text: string) => void;
   onBack: () => void;
+  /** Baris identitas pesanan. Figma menaruhnya SESUDAH hero: yang pertama dibaca di layar
+   *  hasil adalah hasilnya, bukan tiga baris data yang sama di setiap keadaan. */
+  identity: React.ReactNode;
 }) {
   const paidAt = formatWibDateTime(order.paidAt);
   // Kredit yang ditolak ops: nominal yang benar-benar masuk TIDAK dikirim ke FE (justru
@@ -530,6 +709,8 @@ function FailedPaidState({
         </p>
       </div>
 
+      {identity}
+
       <MintStatusTracker order={order} />
 
       <OrderReference order={order} onCopy={onCopy} />
@@ -549,10 +730,14 @@ function HeldState({
   order,
   onCopy,
   onBack,
+  identity,
 }: {
   order: MintOrderDetail;
   onCopy: (text: string) => void;
   onBack: () => void;
+  /** Baris identitas pesanan. Figma menaruhnya SESUDAH hero: yang pertama dibaca di layar
+   *  hasil adalah hasilnya, bukan tiga baris data yang sama di setiap keadaan. */
+  identity: React.ReactNode;
 }) {
   const paidAt = formatWibDateTime(order.paidAt);
   return (
@@ -568,6 +753,8 @@ function HeldState({
           sedang memeriksanya. <span className="font-semibold">Jangan transfer lagi.</span>
         </p>
       </div>
+
+      {identity}
 
       {/* Sama seperti layar gagal: nomor pesanan sebagai rujukan, BUKAN "hubungi dukungan" yang
           salurannya belum ada di kode. */}
@@ -661,42 +848,73 @@ function LoadFailedState({
   );
 }
 
-function SuccessState({ order, onBack }: { order: MintOrderDetail; onBack: () => void }) {
+function SuccessState({
+  order,
+  onBack,
+  onCopy,
+  identity,
+}: {
+  order: MintOrderDetail;
+  onBack: () => void;
+  onCopy: (text: string) => void;
+  identity: React.ReactNode;
+}) {
   const explorer = order.onChainTxHash ? txExplorerUrl(order.chain, order.onChainTxHash) : null;
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col items-center gap-2 py-2 text-center">
-        <span className="flex size-14 items-center justify-center rounded-full bg-success/10 text-success-text">
+      {/* Figma A4 (`2610:20813`): lingkaran 56 ber-tint, judul h 28, satu kalimat di bawahnya. */}
+      <div className="flex flex-col items-center gap-1.5 py-2 text-center">
+        <span className="flex size-14 items-center justify-center rounded-full bg-success/12 text-success-text">
           <CheckCircle2 className="size-8" />
         </span>
-        <p className="text-base font-semibold text-foreground">Mint Berhasil</p>
+        <p className="text-lg leading-7 font-semibold text-foreground">
+          {CHECKOUT_COPY.successHeading}
+        </p>
         <p className="text-sm text-muted-foreground">
-          <span className="font-semibold text-foreground">{Number(order.amount)} USDX</span> sudah
-          dikirim ke wallet kamu.
+          <span className="font-semibold text-foreground">
+            {formatTokenAmount(order.amount)} USDX
+          </span>{" "}
+          sudah dikirim ke wallet kamu.
         </p>
       </div>
 
+      {identity}
+
       <MintStatusTracker order={order} />
 
-      {explorer && order.onChainTxHash && (
-        <Row label="Tx on-chain">
-          <a
-            href={explorer}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-mono text-xs text-primary-text hover:underline"
-          >
-            {truncateAddress(order.onChainTxHash, 6)}
-          </a>
-        </Row>
+      {/* Hash-nya kotak yang bisa disalin, bukan tautan mungil (Figma `2610:20876`+`2610:20884`):
+          hash adalah hal yang orang SALIN untuk ditempel ke tempat lain, dan tautan explorer
+          berdiri sendiri di bawahnya supaya dua tindakan itu tidak berebut satu target klik. */}
+      {order.onChainTxHash && (
+        <div className="flex flex-col gap-1.5">
+          <CopyField
+            label={CHECKOUT_COPY.txLabel(chainLabel(order.chain))}
+            value={truncateAddress(order.onChainTxHash, 8)}
+            copyValue={order.onChainTxHash}
+            onCopy={onCopy}
+            copyAriaLabel={CHECKOUT_COPY.copyTxAriaLabel}
+            mono
+          />
+          {explorer && (
+            <LinkInline
+              href={explorer}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="self-start text-sm"
+            >
+              {CHECKOUT_COPY.viewOnExplorer(explorerName(order.chain))}
+            </LinkInline>
+          )}
+        </div>
       )}
 
-      <Button type="button" variant="brand" onClick={onBack}>
+      <Button type="button" variant="brand" size="lg" onClick={onBack}>
         {CHECKOUT_COPY.backToAppCta}
       </Button>
     </div>
   );
 }
+
 
 export function CheckoutContent() {
   const router = useRouter();
@@ -779,9 +997,21 @@ export function CheckoutContent() {
   // banner simulasi TIDAK tampil. Salah tampil di dev cuma bikin bingung; salah tampil di prod
   // memberi tahu user bahwa transfer sungguhannya tidak diproses.
   const isSimulation = order?.paymentMode === "SIMULATION";
+  // Satu kata status untuk kepala kartu (Figma: ada di setiap state).
+  const statusChip = order ? orderStatusLabel(order) : null;
+  // Keadaan yang punya hero sendiri: hero dulu, identitas sesudahnya (urutan Figma A3/A4/C1).
+  const heroFirst = isCompleted || failedAfterMoneyIn || Boolean(moneyIn);
+  const identityRows = order ? <OrderIdentityRows order={order} onCopy={copy} /> : null;
+  // Sisa waktu, sudah terformat. Dipakai di dua tempat berbeda tergantung APA yang habis:
+  // kursnya (sebelum metode dipilih) atau instrumen bayarnya (sesudah).
+  const countdownText = showCountdown ? formatCountdown(secondsLeft) : null;
+  const extendedNote =
+    order && !beforeMethod && deadlineExtended
+      ? CHECKOUT_COPY.countdownExtendedNote(order.paymentChannel)
+      : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[520px] flex-col gap-4 px-4 py-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-[544px] flex-col gap-4 px-4 py-8">
       {isLoading ? (
         <Card>
           <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
@@ -812,61 +1042,36 @@ export function CheckoutContent() {
         </Card>
       ) : (
         <>
-          {showCountdown && (
-            <div className="flex flex-col gap-1 rounded-lg bg-primary/5 px-4 py-2.5 text-center text-sm text-foreground">
-              <span>
-                {beforeMethod
-                  ? CHECKOUT_COPY.countdownBeforeMethod
-                  : CHECKOUT_COPY.countdownAfterMethod(order.paymentChannel)}{" "}
-                <span className="font-semibold tabular-nums">{formatCountdown(secondsLeft)}</span>
-              </span>
-              {/* Lompatan angkanya diakui, bukan disembunyikan — dan hanya kepada orang yang
-                  benar-benar menyaksikannya di tab ini (F2). */}
-              {!beforeMethod && deadlineExtended && (
-                <span className="text-xs text-muted-foreground">
-                  {CHECKOUT_COPY.countdownExtendedNote(order.paymentChannel)}
-                </span>
-              )}
-            </div>
-          )}
-
           <Card>
-            <div className="flex flex-col gap-1">
-              <h2 className="text-base font-medium text-foreground">Minting USDX</h2>
-              <p className="text-xs text-muted-foreground">Pesanan #{order.orderNumber}</p>
+            {/* Kepala dua kolom (Figma `header`, h 46): identitas pesanan di kiri, status di
+                kanan. Spanduk countdown yang dulu melayang DI ATAS kartu dihapus — ia tidak ada
+                di satu pun state Figma, dan ia elemen paling mencolok di layar. Sisa waktunya
+                pindah ke tempat yang menerangkan apa yang habis: baris "Kurs terkunci" sebelum
+                metode dipilih, kepala panel instrumen sesudahnya. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <h2 className="text-lg leading-7 font-medium text-foreground">Minting USDX</h2>
+                <p className="text-xs text-muted-foreground">Pesanan #{order.orderNumber}</p>
+              </div>
+              <StatusBadge status={statusChip!.status} className="mt-1.5 shrink-0">
+                {statusChip!.label}
+              </StatusBadge>
             </div>
 
-            {/* Dua angka, dua nama berbeda: "Nilai pesanan" (sebelum biaya layanan PG) vs
-                "Total bayar" (yang benar-benar ditagih). Dulu keduanya sama-sama disebut
-                "pembayaran" dengan angka berbeda — pemicu ragu tepat di layar bayar. */}
-            <Row label="Nilai pesanan">{formatIDR(Number(order.totalBeforePgFeeIdr))}</Row>
-            {order.totalPayIdr && (
+            {/* Layar instruksi bayar menyembunyikan blok ini seluruhnya (Figma A2): identitas
+                pesanan pindah ke accordion "Rincian pesanan" di bawah. Mengulangnya di atas
+                instruksi membuat layar itu 2,3× lebih tinggi dari desain, dan yang terdorong ke
+                bawah lipatan justru nomor VA-nya. */}
+            {/* Layar HASIL (sukses / gagal / diterima / ditinjau) menaruh baris identitas
+                SESUDAH hero-nya, bukan sebelum: yang harus terbaca duluan adalah bagaimana
+                pesanannya berakhir. Jadi barisnya dikirim ke komponen keadaan sebagai prop,
+                dan blok ini cuma untuk layar yang belum punya hero. */}
+            {!showInstructions && !heroFirst && (
               <>
-                {!showInstructions && (
-                  <Row label={TOTAL_LABEL}>{formatIDR(Number(order.totalPayIdr))}</Row>
-                )}
-                <FeeBreakdown order={order} />
+                <OrderIdentityRows order={order} onCopy={copy} />
+                <div className="border-t border-border" />
               </>
             )}
-            <div className="border-t border-border" />
-            <Row label="Nama Lengkap">{order.customerName}</Row>
-            <Row label="Wallet Tujuan">
-              <span className="font-mono text-xs">
-                {order.chain} · {truncateAddress(order.userAddress)}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => copy(order.userAddress)}
-                aria-label="Salin"
-                className="text-muted-foreground"
-              >
-                <Copy />
-              </Button>
-            </Row>
-
-            <div className="border-t border-border" />
 
             {/* Urutan cabang mengikuti "di mana uangnya", bukan sekadar enum: sudah selesai →
                 uang masuk tapi pesanan gagal → uang sudah masuk → order mati → belum pilih
@@ -876,14 +1081,14 @@ export function CheckoutContent() {
                 mengira uangnya hangus. Yang berubah (B4): keadaan itu tidak lagi memakai layar
                 hijau yang sama dengan pesanan sehat, melainkan layarnya sendiri. */}
             {isCompleted ? (
-              <SuccessState order={order} onBack={backToApp} />
+              <SuccessState order={order} onBack={backToApp} onCopy={copy} identity={identityRows} />
             ) : failedAfterMoneyIn ? (
-              <FailedPaidState order={order} onCopy={copy} onBack={backToApp} />
+              <FailedPaidState order={order} onCopy={copy} onBack={backToApp} identity={identityRows} />
             ) : moneyIn ? (
               order.paymentStatus === "HELD" ? (
-                <HeldState order={order} onCopy={copy} onBack={backToApp} />
+                <HeldState order={order} onCopy={copy} onBack={backToApp} identity={identityRows} />
               ) : (
-                <PaidState order={order} onCopy={copy} onBack={backToApp} />
+                <PaidState order={order} onCopy={copy} onBack={backToApp} identity={identityRows} />
               )
             ) : isDead ? (
               <DeadState order={order} onBack={backToApp} />
@@ -898,6 +1103,11 @@ export function CheckoutContent() {
               <PaymentMethodSelector
                 channels={resolveChannels(order)}
                 totalBeforePgFeeIdr={order.totalBeforePgFeeIdr}
+                effectiveRate={order.effectiveRate}
+                subtotalIdr={order.subtotalIdr}
+                mintFeePct={order.mintFeePct}
+                mintFeeIdr={order.mintFeeIdr}
+                countdown={countdownText}
                 isPaying={isPaying}
                 payError={payError}
                 onPay={(channel, bank) => {
@@ -924,16 +1134,40 @@ export function CheckoutContent() {
               </div>
             ) : (
               <div className="flex flex-col gap-4">
-                <PaymentInstructions order={order} onCopy={copy} />
+                <PaymentInstructions
+                  order={order}
+                  onCopy={copy}
+                  countdown={countdownText}
+                  extendedNote={extendedNote}
+                />
                 <HowToPay channel={order.paymentChannel} isSimulation={isSimulation} />
-                <div className="border-t border-border" />
                 <MintStatusTracker order={order} />
+                {/* Identitas pesanan + rincian biaya, dilipat (Figma `2610:20087`). Di layar
+                    instruksi yang dibutuhkan cuma nomor VA dan nominalnya; sisanya rujukan. */}
+                <Accordion title={CHECKOUT_COPY.orderDetailsLabel}>
+                  <div className="flex flex-col gap-2 pb-1">
+                    <DetailRow label={CHECKOUT_COPY.youReceiveLabel}>
+                      {formatTokenAmount(order.amount)} USDX
+                    </DetailRow>
+                    <DetailRow label={CHECKOUT_COPY.walletLabel}>
+                      <span className="font-mono">
+                        {order.chain} · {truncateAddress(order.userAddress)}
+                      </span>
+                    </DetailRow>
+                    <DetailRow label={CHECKOUT_COPY.customerNameLabel}>
+                      {order.customerName}
+                    </DetailRow>
+                  </div>
+                  <FeeRows order={order} />
+                </Accordion>
                 {/* Temuan F1: ini satu-satunya layar yang dulu tak punya jalan pulang. Tombol
                     "Batal" hilang bersama pemilih metode, dan tidak ada penggantinya — justru di
                     layar tempat orang paling mungkin berpikir ulang. Nomor VA tidak hangus karena
                     halamannya ditutup, dan kalimat di bawah tombol yang memastikan itu. */}
                 <div className="border-t border-border" />
-                <BackButton onClick={backToApp} label={CHECKOUT_COPY.backToAppCta} />
+                <Button type="button" variant="outline" size="lg" onClick={backToApp}>
+                  {CHECKOUT_COPY.backToAppCta}
+                </Button>
                 <p className="-mt-2 text-center text-xs text-muted-foreground">
                   {CHECKOUT_COPY.leaveNote(order.paymentChannel)}
                 </p>
