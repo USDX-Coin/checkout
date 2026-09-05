@@ -3,10 +3,14 @@
 // Status tracker 3 dimensi (USDX-224, port USDX-202): Pembayaran → Proses on-chain →
 // Selesai, diturunkan dari paymentStatus + status overall order (conventions.md § Status
 // Enums). Di-poll checkout via GET /v2/mint/{id}.
+//
+// Tata letak, garis penghubung, dan ikonnya milik `ui/steps` — komponen `Steps (23)` di Figma
+// yang juga dipakai jalur partner. Yang tersisa di berkas ini cuma yang memang khas mint:
+// PETA dari tiga dimensi status order ke keadaan tiap langkah.
 
-import { Check, Clock, Loader2, X } from "lucide-react";
+import { X } from "lucide-react";
+import { Steps, type StepItem } from "@/components/ui/steps";
 import type { MintOrderDetail } from "@/types";
-import { cn } from "@/lib/utils";
 
 // `activeHint` tampil HANYA saat langkahnya berjalan. "Proses on-chain" praktiknya = menunggu
 // tanda tangan multisig Safe — bisa menit, bisa jam, tergantung penandatangan. Sengaja TANPA
@@ -29,7 +33,7 @@ const STEPS: { label: string; activeHint: string | null; spinWhenActive: boolean
   { label: "Selesai", activeHint: null, spinWhenActive: true },
 ];
 
-type StepState = "done" | "active" | "pending" | "failed";
+type StepState = StepItem["state"];
 
 // Keterangan langkah yang gagal — dan LANGKAH MANA yang gagal berbeda antara dua jalur, karena
 // nasib uangnya berbeda (`sot/conventions.md § Status Enums`, `sot/bni-integration.md §6`):
@@ -62,50 +66,6 @@ function stepStates(order: MintOrderDetail): StepState[] {
   ];
 }
 
-function StepIcon({ state, spin }: { state: StepState; spin: boolean }) {
-  // Langkah selesai memakai `--success`, BUKAN `--primary`. Dua alasan, dan yang kedua yang
-  // menentukan:
-  //  1. Di layar FAILED + PAID ikon "selesai" dan ikon "gagal" muncul BERSEBELAHAN. `--primary`
-  //     di tema gelap adalah maroon (#800000) dan `--destructive` merah muda (#f87171) — dua
-  //     lingkaran kemerahan bertumpuk di satu-satunya layar yang paling butuh dibaca sekilas.
-  //  2. Maroon adalah warna MEREK, bukan warna status. Memakainya untuk menyatakan "berhasil"
-  //     persis yang melahirkan temuan audit C8 (warna sukses berbeda antara app dan checkout).
-  //     `PartnerProgressStepper` sudah memakai `bg-success` untuk langkah yang sama; ini
-  //     menyamakan keduanya alih-alih menambah versi ketiga.
-  //
-  // Glifnya `text-card`, bukan `text-white` — dan ini bukan detail. Hijau dan merah tema gelap
-  // sama-sama TERANG: #22c55e lawan #f87171 cuma berbeda 1,21:1 dalam luminansi (diukur di
-  // layar FAILED + PAID). Artinya kedua status itu dibedakan oleh HUE saja, dan mata yang tak
-  // bisa mengandalkan hue harus bersandar pada BENTUK glifnya — centang lawan silang. Justru
-  // glif itu yang paling lemah dengan `text-white` di atas isian terang: 2,28:1 (selesai) dan
-  // 2,77:1 (gagal). Dilubangi dengan warna permukaan kartu keduanya jadi 7,64:1 dan 6,29:1 di
-  // gelap, sementara di terang tetap 3,30:1 dan 3,76:1 seperti sebelumnya — naik tanpa menukar
-  // satu tema dengan tema lain.
-  if (state === "done")
-    return (
-      <span className="flex size-6 items-center justify-center rounded-full bg-success text-card">
-        <Check className="size-3.5" />
-      </span>
-    );
-  if (state === "failed")
-    return (
-      <span className="flex size-6 items-center justify-center rounded-full bg-destructive text-card">
-        <X className="size-3.5" />
-      </span>
-    );
-  if (state === "active")
-    return (
-      // `primary-text`, bukan `primary`: maroon #800000 di atas kartu gelap hanya
-      // 1,59:1, dan ikon inilah satu-satunya penanda langkah yang sedang berjalan.
-      <span className="flex size-6 items-center justify-center rounded-full border border-primary-text text-primary-text">
-        {spin ? <Loader2 className="size-3.5 animate-spin" /> : <Clock className="size-3.5" />}
-      </span>
-    );
-  return (
-    <span className="flex size-6 items-center justify-center rounded-full border border-border" />
-  );
-}
-
 export function MintStatusTracker({ order }: { order: MintOrderDetail }) {
   // Gagal SEBELUM uang masuk: tak ada langkah yang perlu dirinci — pesanannya memang tidak
   // pernah berjalan. Gagal SESUDAH uang masuk dirender sebagai langkah (lihat `stepStates`).
@@ -118,36 +78,24 @@ export function MintStatusTracker({ order }: { order: MintOrderDetail }) {
   }
 
   const states = stepStates(order);
+  const steps: StepItem[] = STEPS.map(({ label, activeHint, spinWhenActive }, i) => ({
+    label,
+    state: states[i],
+    spinWhenActive,
+    detail:
+      states[i] === "failed"
+        ? i === 0
+          ? FAILED_HINT.payment
+          : FAILED_HINT.onChain
+        : activeHint && states[i] === "active"
+          ? activeHint
+          : null,
+  }));
+
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium text-foreground">Status transaksi</p>
-      <ol className="flex flex-col gap-2.5">
-        {STEPS.map(({ label, activeHint, spinWhenActive }, i) => (
-          <li key={label} className="flex items-start gap-2.5">
-            <StepIcon state={states[i]} spin={spinWhenActive} />
-            <div className="flex flex-col gap-0.5 pt-0.5">
-              <span
-                className={cn(
-                  "text-sm",
-                  states[i] === "pending" && "text-muted-foreground",
-                  states[i] === "failed" && "font-medium text-destructive-text",
-                  states[i] !== "pending" && states[i] !== "failed" && "font-medium text-foreground",
-                )}
-              >
-                {label}
-              </span>
-              {activeHint && states[i] === "active" && (
-                <span className="text-xs leading-relaxed text-muted-foreground">{activeHint}</span>
-              )}
-              {states[i] === "failed" && (
-                <span className="text-xs leading-relaxed text-destructive-text">
-                  {i === 0 ? FAILED_HINT.payment : FAILED_HINT.onChain}
-                </span>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
+      <Steps steps={steps} />
     </div>
   );
 }

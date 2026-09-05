@@ -129,7 +129,7 @@ describe("metode/bank tunggal dipilih dari awal (F6)", () => {
     test("satu metode + satu bank → tombol bayar langsung hidup", () => {
       renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BNI"] }]);
       expect(screen.getByRole("radio", { name: "BNI" })).toBeChecked();
-      expect(screen.getByText("Bayar Sekarang").closest("button")).not.toBeDisabled();
+      expect(screen.getByText("Bayar sekarang").closest("button")).not.toBeDisabled();
     });
   });
 
@@ -137,12 +137,12 @@ describe("metode/bank tunggal dipilih dari awal (F6)", () => {
     test("lebih dari satu metode → tak ada yang dipilih diam-diam", () => {
       renderSelector([VA, QRIS_MAHAL]);
       expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0);
-      expect(screen.getByText("Bayar Sekarang").closest("button")).toBeDisabled();
+      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
     });
 
     test("satu metode tapi banyak bank → bayar tetap terkunci sampai bank dipilih", () => {
       renderSelector([VA]);
-      expect(screen.getByText("Bayar Sekarang").closest("button")).toBeDisabled();
+      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
       expect(screen.getByText(/Pilih bank dulu untuk lanjut/)).toBeInTheDocument();
     });
   });
