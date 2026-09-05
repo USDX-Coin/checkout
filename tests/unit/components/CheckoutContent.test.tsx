@@ -222,7 +222,7 @@ describe("keadaan: sudah bayar / menunggu approval (Tugas 6 poin 2, 3, 4)", () =
       // Guard USDX-293 tetap berlaku: tanpa bukti tx on-chain jangan bilang berhasil.
       renderWith(makeOrder({ ...SUDAH_BAYAR, status: "COMPLETED", onChainTxHash: null }));
       expect(screen.getByText("Pembayaran diterima")).toBeInTheDocument();
-      expect(screen.queryByText("Mint Berhasil")).not.toBeInTheDocument();
+      expect(screen.queryByText("Mint berhasil")).not.toBeInTheDocument();
     });
   });
 });
@@ -231,7 +231,7 @@ describe("keadaan: selesai", () => {
   describe("positive", () => {
     test("COMPLETED + txHash → layar sukses, tanpa instruksi bayar", () => {
       renderWith(SELESAI);
-      expect(screen.getByText("Mint Berhasil")).toBeInTheDocument();
+      expect(screen.getByText("Mint berhasil")).toBeInTheDocument();
       expect(screen.queryByText(TAGIHAN)).not.toBeInTheDocument();
       expect(screen.queryByText("Pembayaran diterima")).not.toBeInTheDocument();
     });
@@ -251,15 +251,19 @@ describe("keadaan: kedaluwarsa", () => {
 
 describe("penamaan angka (Tugas 6 poin 5)", () => {
   describe("positive", () => {
-    test("dua angka punya nama berbeda + rincian biaya bisa dibuka", () => {
+    test("dua angka punya nama berbeda + rincian pesanan bisa dibuka", () => {
       renderWith(BELUM_BAYAR);
-      expect(screen.getByText("Nilai pesanan")).toBeInTheDocument();
+      // Figma A2 (`2610:19989`) melipat identitas pesanan + rincian biaya ke satu accordion
+      // "Rincian pesanan" di bawah, dan TIDAK mengulang ringkasan di atas instruksi bayar.
+      // Baris "Nilai pesanan" hilang bersamanya: angkanya kembali sebagai "Nilai USDX" di
+      // dalam rincian, dan dua nama untuk satu angka persis temuan D5.
+      expect(screen.queryByText("Nilai pesanan")).not.toBeInTheDocument();
       expect(screen.getAllByText("Total bayar").length).toBeGreaterThan(0);
-      expect(screen.getByText("Rincian biaya")).toBeInTheDocument();
+      expect(screen.getByText("Rincian pesanan")).toBeInTheDocument();
       // Rincian memecah komponennya, bukan mengulang label ringkasan.
       expect(screen.getByText("Nilai USDX")).toBeInTheDocument();
       expect(screen.getByText("Biaya mint (1%)")).toBeInTheDocument();
-      expect(screen.getByText("Biaya layanan pembayaran")).toBeInTheDocument();
+      expect(screen.getByText("Biaya layanan")).toBeInTheDocument();
     });
 
     test("tidak ada lagi label lama 'Total Pembayaran' yang bertabrakan artinya", () => {
@@ -276,24 +280,28 @@ describe("penamaan angka (Tugas 6 poin 5)", () => {
       expect(screen.getByText("Rp 137")).toBeInTheDocument();
     });
 
-    test("belum pilih metode (totalPayIdr null) → hanya nilai pesanan, tanpa rincian", () => {
+    test("belum pilih metode (totalPayIdr null) → hanya identitas pesanan, tanpa rincian", () => {
       renderWith(
         makeOrder({ paymentStatus: "REQUESTED", totalPayIdr: null, pgFeeIdr: null, channels: [] }),
       );
-      expect(screen.getByText("Nilai pesanan")).toBeInTheDocument();
+      // Yang tersisa identitas pesanannya (Figma `pesanan`): berapa USDX yang diterima, ke
+      // wallet mana, atas nama siapa. Angka tagihan belum ada, jadi tak boleh ada yang tampil.
+      expect(screen.getByText("Anda terima")).toBeInTheDocument();
       expect(screen.queryByText("Total bayar")).not.toBeInTheDocument();
-      expect(screen.queryByText("Rincian biaya")).not.toBeInTheDocument();
+      expect(screen.queryByText("Rincian pesanan")).not.toBeInTheDocument();
     });
   });
 });
 
 describe("logo bank tidak dobel dengan namanya", () => {
   describe("positive", () => {
-    test("bank berlogo → hanya logo (nama tetap terbaca lewat alt), bukan 'BCA BCA'", () => {
+    test("bank berlogo → nama produk sekali di samping logo, bukan 'BCA BCA'", () => {
       renderWith(BELUM_BAYAR);
-      const row = screen.getByText("Virtual Account").parentElement!;
-      expect(row.querySelector("img")).toHaveAttribute("alt", "BCA");
-      expect(row.textContent).not.toContain("BCA");
+      // Figma A2 (`2610:20001`) menulis "Virtual Account BCA" DI SAMPING logonya: itu nama
+      // produknya, bukan pengulangan logo. Yang tetap haram: menuliskannya dua kali.
+      const head = screen.getByText("Virtual Account BCA").parentElement!;
+      expect(head.querySelector("img")).toHaveAttribute("alt", "BCA");
+      expect(head.textContent!.match(/BCA/g)).toHaveLength(1);
     });
   });
 });
@@ -800,7 +808,7 @@ describe("keadaan tak dikenal jatuh ke fallback yang aman, bukan ke tagihan", ()
 
     test("EXPIRED + COMPLETED + tx terbukti → layar sukses, bukan fallback", () => {
       renderWith(makeOrder({ paymentStatus: "EXPIRED", status: "COMPLETED", onChainTxHash: "0xd" }));
-      expect(screen.getByText("Mint Berhasil")).toBeInTheDocument();
+      expect(screen.getByText("Mint berhasil")).toBeInTheDocument();
     });
   });
 });

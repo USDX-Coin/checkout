@@ -23,7 +23,7 @@ import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { exchangeHandoffCode } from "@/lib/api/auth";
 import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
 import { isOrderIdWellFormed } from "@/lib/checkout/order-id";
-import { readHandoffCodeFromHash, getToken, setToken } from "@/lib/auth/token";
+import { readHandoffCodeFromHash, setToken, clearToken } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
@@ -78,16 +78,29 @@ export function useCheckout(id: string) {
   // Baca one-time handoff `#code=` dari URL hash SEKALI saat render pertama (lazy
   // useState jalan sebelum effect & sebelum queryFn React Query) + STRIP dari URL
   // (anti-replay dari history/Referer). SSR-safe (lihat token.ts).
-  const [handoffCode] = useState<string | null>(() => readHandoffCodeFromHash());
-  // Sesi hasil handoff sebelumnya (refresh dalam tab) sudah tersimpan → tak perlu
-  // tukar lagi. Dibaca sekali agar tidak berubah antar-render.
-  const [alreadyAuthed] = useState<boolean>(() => getToken() !== null);
+  const [handoffCode] = useState<string | null>(() => {
+    const code = readHandoffCodeFromHash();
+    // `code` di URL adalah pernyataan eksplisit dari `app`: ini sesi checkout BARU.
+    // Token sisa di sessionStorage milik pesanan SEBELUMNYA, dan ia harus dibuang di
+    // sini — sebelum satu pun query sempat membacanya.
+    //
+    // Versi lama menukar code hanya kalau belum ada token (`&& !alreadyAuthed`).
+    // Akibatnya begitu satu sesi rusak, token basinya menghalangi penukaran code baru,
+    // GET dijawab 401, dan SETIAP pesanan berikutnya di tab yang sama ikut gagal dengan
+    // "Sesi checkout kedaluwarsa" — pesanannya terbuat di `app`, checkoutnya tak pernah
+    // terbuka. Token lama tidak pernah lebih benar daripada code yang baru saja
+    // diberikan; kalau ada code, code yang menang.
+    if (code) clearToken();
+    return code;
+  });
 
   // Tukar `code` → raw session token (public/pre-auth), simpan sbg bearer SEBELUM GET
-  // pertama (anti-race). Jalan hanya bila ada `code` DAN belum punya token.
-  // `retry: false` — code sekali-pakai; kalau di-retry, percobaan ke-2 pasti 401
-  // (sudah terpakai). `staleTime: Infinity` — jangan refetch (code sudah di-strip).
-  const needsExchange = Boolean(handoffCode) && !alreadyAuthed;
+  // pertama (anti-race). `retry: false` — code sekali-pakai; percobaan ke-2 pasti 401.
+  // `staleTime: Infinity` — jangan refetch (code sudah di-strip dari URL).
+  //
+  // Tanpa `code` (mis. refresh setelah code di-strip) exchange tidak jalan dan GET
+  // memakai token yang sudah tersimpan — itulah yang membuat refresh tetap bekerja.
+  const needsExchange = Boolean(handoffCode);
   const exchange = useQuery({
     queryKey: ["checkout-token-exchange", id],
     queryFn: async () => {
