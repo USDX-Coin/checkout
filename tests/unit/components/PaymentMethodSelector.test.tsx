@@ -28,6 +28,29 @@ function renderSelector(channels: MintChannelOption[]) {
 }
 
 describe("total bayar terbaca sejak awal (D4)", () => {
+  // Regresi 5 Sep 2026. `hasBreakdown` dulu menuntut `n > 0` untuk SETIAP angka,
+  // jadi backend yang mengirim `mintFeeIdr: "0.00"` (mint gratis — nilai yang sah)
+  // menghapus SELURUH tabel rincian: kurs terkunci beserta hitung mundurnya, nilai
+  // USDX, biaya, total. Yang tersisa di layar tempat orang memutuskan membayar cuma
+  // satu angka tanpa penjelasan.
+  test("biaya mint nol tidak menghapus tabel rincian", () => {
+    render(
+      <PaymentMethodSelector
+        channels={[VA]}
+        totalBeforePgFeeIdr="162500"
+        subtotalIdr="162500.00"
+        mintFeeIdr="0.00"
+        effectiveRate="16250.0000"
+        isPaying={false}
+        payError={null}
+        onPay={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Kurs terkunci/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nilai USDX/i)).toBeInTheDocument();
+  });
+
   describe("positive", () => {
     test("satu metode → total pasti tampil sebelum apa pun diklik", () => {
       renderSelector([VA]);

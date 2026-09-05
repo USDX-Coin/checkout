@@ -177,7 +177,13 @@ export function PaymentMethodSelector({
   const subtotal = Number(subtotalIdr);
   const mintFee = Number(mintFeeIdr);
   const rate = Number(effectiveRate);
-  const hasBreakdown = [subtotal, mintFee].every((n) => Number.isFinite(n) && n > 0);
+  // `>= 0`, BUKAN `> 0`. Biaya mint nol adalah nilai yang SAH — artinya gratis, bukan
+  // artinya datanya belum ada. Dengan `> 0`, backend dev yang mengirim `mintFeePct: 0`
+  // membuat SELURUH tabel rincian hilang: kurs terkunci beserta hitung mundurnya, nilai
+  // USDX, biaya, semuanya — dan yang tersisa di layar tempat orang memutuskan membayar
+  // cuma satu angka "Total bayar" tanpa penjelasan. Yang menentukan tabel ini layak
+  // tampil adalah angkanya ADA dan masuk akal, bukan angkanya kebetulan positif.
+  const hasBreakdown = [subtotal, mintFee].every((n) => Number.isFinite(n) && n >= 0) && subtotal > 0;
 
   // Figma menghapus biaya layanan dari kartu metode karena di desain cuma ada satu metode
   // hidup — perbandingannya tak pernah terjadi. Di produksi `channels[]` membawa VA dan QRIS

@@ -99,6 +99,58 @@ function routeFetch(handlers: {
 }
 
 describe("useCheckout — auth exchange (USDX-378)", () => {
+  // Regresi 5 Sep 2026. `needsExchange` dulu berbunyi `Boolean(code) && !alreadyAuthed`,
+  // jadi token sisa pesanan SEBELUMNYA membuat code BARU tak pernah ditukar: GET memakai
+  // token basi → 401 → "Sesi checkout kedaluwarsa". Karena token itu tak pernah dibuang,
+  // SETIAP pesanan berikutnya di tab yang sama ikut gagal — pesanannya terbuat di `app`,
+  // checkoutnya tak pernah terbuka. Dua tes di bawah mengunci kedua arahnya.
+  test("code baru MENANG atas token sesi lama di sessionStorage", async () => {
+    setToken("token-pesanan-lama");
+    window.location.hash = "#code=hc-baru";
+    fetchMock.mockImplementation(
+      routeFetch({
+        exchange: () => jsonResponse(200, { status: "success", data: { token: "sess-baru" } }),
+        mint: () => jsonResponse(200, { status: "success", data: makeOrder() }),
+      }),
+    );
+
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.order).not.toBeNull());
+
+    // Exchange TETAP dipanggil meski sessionStorage sudah berisi token.
+    const exchangeCall = fetchMock.mock.calls.find(([u]) =>
+      (u as string).includes("/auth/checkout-token/exchange"),
+    );
+    expect(exchangeCall).toBeDefined();
+    expect(exchangeCall?.[1].body).toBe(JSON.stringify({ code: "hc-baru" }));
+
+    // GET memakai token BARU, bukan yang lama.
+    const getCall = fetchMock.mock.calls.find(
+      ([u, i]) => (u as string).includes("/mint/0198f2c4") && (i as RequestInit)?.method === "GET",
+    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-baru");
+    expect(window.sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("sess-baru");
+  });
+
+  test("tanpa code (refresh sesudah code di-strip) token tersimpan tetap dipakai, exchange tidak jalan", async () => {
+    setToken("sess-tersimpan");
+    window.location.hash = "";
+    fetchMock.mockImplementation(
+      routeFetch({ mint: () => jsonResponse(200, { status: "success", data: makeOrder() }) }),
+    );
+
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.order).not.toBeNull());
+
+    expect(
+      fetchMock.mock.calls.some(([u]) => (u as string).includes("/auth/checkout-token/exchange")),
+    ).toBe(false);
+    const getCall = fetchMock.mock.calls.find(
+      ([u, i]) => (u as string).includes("/mint/0198f2c4") && (i as RequestInit)?.method === "GET",
+    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-tersimpan");
+  });
+
   test("exchanges #code before the first GET → GET carries the exchanged session token; code stripped, not persisted", async () => {
     window.location.hash = "#code=hc-1";
     fetchMock.mockImplementation(
