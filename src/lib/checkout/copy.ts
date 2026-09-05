@@ -119,6 +119,12 @@ export const CHECKOUT_COPY = {
   payCta: "Bayar sekarang",
   pickMethodHint: "Pilih metode pembayaran untuk lanjut.",
   pickBankHint: "Pilih bank dulu untuk lanjut.",
+  // Kartu metode KEDUA di Figma A1a/A1b (`2639:31820`), digambar mati dengan badge gold.
+  // Ia tidak datang dari `channels[]` dan tidak boleh: transfer bank langsung memang belum
+  // ada di backend, dan justru itu yang diberitahukan kartunya. Keputusan pemilik produk
+  // 5 September 2026 — lihat SELISIH-FIGMA-CHECKOUT.md §10.2 yang dibatalkan olehnya.
+  directTransferTitle: "Transfer bank BNI",
+  comingSoonBadge: "Segera hadir",
 
   // ── Tabel rincian biaya (Figma `kelompok ringkasan · 06f Opsi 3`) ──────────────────────────
   lockedRateLabel: "Kurs terkunci",

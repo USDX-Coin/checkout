@@ -67,9 +67,14 @@ function resolveChannels(order: MintOrderDetail): MintChannelOption[] {
   return order.channels ?? [];
 }
 
+// Tepi kartu digambar sebagai bayangan INSET, bukan `border`. Figma menaruh stroke di DALAM
+// kartu: `2639:31772` lebar 512 dengan anak-anak di x=24 selebar 464 — 24 + 464 + 24 = 512,
+// stroke tidak mengambil ruang. `border` mengambil: isinya jadi 462, dan selisih 2 px itu
+// menular ke semua yang mengisi lebar penuh — dua tombol aksi jadi 226/224 alih-alih 226/226,
+// ubin bank 148,66 alih-alih 149,33.
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-5 min-[544px]:p-6">
+    <div className="flex w-full flex-col gap-4 rounded-xl bg-card p-5 shadow-[inset_0_0_0_1px_var(--color-border)] min-[544px]:p-6">
       {children}
     </div>
   );

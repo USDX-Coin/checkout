@@ -27,7 +27,7 @@
 import { useState } from "react";
 import { Landmark, Lock, QrCode } from "lucide-react";
 import type { MintChannelOption, PaymentChannel, VaBank } from "@/types";
-import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
+import { BANK_BRAND, QRIS_RED, sortVaBanks } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
 import { Button } from "@/components/ui/button";
 import { CardChoice } from "@/components/ui/card-choice";
@@ -61,8 +61,10 @@ function channelIcon(channel: PaymentChannel) {
 // kalimat generik — daftar itu yang benar-benar menjawab "bisa transfer dari mana".
 function channelDescription(option: MintChannelOption): string {
   if (option.channel === "QRIS") return CHECKOUT_COPY.qrisDescription;
-  const banks = option.banks ?? [];
-  return banks.length > 0 ? banks.join(" · ") : CHECKOUT_COPY.vaDescriptionFallback;
+  const banks = sortVaBanks(option.banks ?? []);
+  return banks.length > 0
+    ? banks.map((b) => BANK_BRAND[b]?.name ?? b).join(" · ")
+    : CHECKOUT_COPY.vaDescriptionFallback;
 }
 
 // Satu baris tabel rincian. `strong` untuk baris total: Figma menebalkan LABEL dan NILAI-nya,
@@ -122,20 +124,27 @@ export function PaymentMethodSelector({
   mintFeeIdr,
   countdown,
 }: PaymentMethodSelectorProps) {
-  // Temuan F6: satu-satunya metode yang ditawarkan tetap harus diklik manual sebelum tombol
-  // bayar hidup — pilihan yang tidak punya alternatif bukan pilihan, cuma rintangan.
-  const [channel, setChannel] = useState<PaymentChannel | null>(
-    () => (channels.length === 1 ? channels[0].channel : null),
-  );
-  const [bank, setBank] = useState<VaBank | null>(() => {
-    const only = channels.length === 1 ? channels[0] : null;
-    return only?.channel === "VA" && only.banks?.length === 1 ? only.banks[0] : null;
-  });
+  // TIDAK ADA yang dipilih sebelum orangnya memilih — persis Figma A1a (`2639:31807`:
+  // "default (belum dipilih, tidak dipra-pilih)"), di dua lapisnya sekaligus.
+  //
+  // Sebelumnya di sini ada aturan F6 "metode/bank tunggal dipilih dari awal". Aturan itu
+  // dicabut, karena premisnya sudah tidak ada dan akibatnya nyata:
+  //  1. Premis "cuma satu pilihan". Backend dev memang mengirim satu channel, tapi layar ini
+  //     selalu punya DUA kartu — kartu kedua "Transfer bank BNI" digambar permanen. Jadi
+  //     `channels.length === 1` tidak lagi berarti "tidak ada yang bisa dipilih".
+  //  2. Akibatnya. Dengan satu channel, layar terbuka dengan Virtual Account sudah tercentang
+  //     dan langkah "pilih metode" terlewat sama sekali — layar A1a tidak pernah terlihat.
+  //     Yang tersisa cuma tulisan "Pilih bank dulu untuk lanjut" di bawah kartu yang entah
+  //     kenapa sudah menyala.
+  //  3. Bank pun tidak lagi dipra-pilih walau cuma satu: ini rekening tujuan uang. Kalau
+  //     tombol bayar hidup tanpa satu ketukan pun, tidak ada momen di mana orangnya
+  //     menyatakan "ya, ke bank ini".
+  const [channel, setChannel] = useState<PaymentChannel | null>(null);
+  const [bank, setBank] = useState<VaBank | null>(null);
 
   function pickChannel(next: PaymentChannel) {
     setChannel(next);
-    const opt = channels.find((c) => c.channel === next);
-    setBank(opt?.channel === "VA" && opt.banks?.length === 1 ? opt.banks[0] : null);
+    setBank(null);
   }
 
   const selected = channels.find((c) => c.channel === channel) ?? null;
@@ -209,6 +218,26 @@ export function PaymentMethodSelector({
               icon={channelIcon(opt.channel)}
             />
           ))}
+
+          {/* Kartu kedua Figma A1a/A1b (`2639:31820`), tanpa keterangan — badge-nya sudah
+              menjelaskan. Sengaja TIDAK berasal dari `channels[]`: transfer bank langsung
+              belum ada di backend, jadi tidak akan pernah muncul di sana, dan justru itu
+              yang diberitahukan kartunya. Menyembunyikannya sampai backend siap berarti
+              orang tetap bertanya-tanya apakah bisa transfer manual — pertanyaan yang
+              sekarang dijawab di tempat pertanyaannya muncul.
+
+              Mati beneran, bukan cuma pudar: `disabled` diteruskan ke `RadioGroupItem`, jadi
+              Radix menandainya `data-disabled`, melepasnya dari roving focus, dan
+              `RadioGroup` di repo ini menyaring `:not([disabled])` saat panah ditekan.
+              Namanya untuk pembaca layar tetap lengkap — "Transfer bank BNI, Segera hadir" —
+              karena teks badge ikut terbaca sebagai bagian dari label. */}
+          <CardChoice
+            value="TRANSFER_MANUAL"
+            id="metode-transfer-manual"
+            title={CHECKOUT_COPY.directTransferTitle}
+            badge={CHECKOUT_COPY.comingSoonBadge}
+            disabled
+          />
         </RadioGroup>
 
         {/* Grup kedua, bukan grup bersarang. Ubinnya seperti desain (logo di atas plat putih,
@@ -224,7 +253,7 @@ export function PaymentMethodSelector({
               aria-label={CHECKOUT_COPY.chooseBankLabel}
               className="grid-cols-3 gap-2"
             >
-              {selected.banks.map((b) => {
+              {sortVaBanks(selected.banks).map((b) => {
                 const brand = BANK_BRAND[b];
                 const isSel = bank === b;
                 const id = `bank-${b}`;
@@ -233,43 +262,55 @@ export function PaymentMethodSelector({
                     key={b}
                     htmlFor={id}
                     className={cn(
-                      // h-16 + p-2 + plat h-12 = angka Figma (`2639:32218`: ubin 64, plat inset
-                      // 8, tinggi 48). Plat `h-9` yang dipakai sebelumnya menyisakan 12 px
-                      // kosong dan membuat logonya mengambang kekecilan.
-                      "flex h-16 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border bg-card p-2 transition-control",
+                      // Ubin 64 · plat inset 8 · plat 48 (Figma `2639:32218`/`2639:32219`).
+                      //
+                      // Tepinya digambar sebagai bayangan INSET, bukan `border`. Border ikut
+                      // menghitung tinggi: 64 − 8 − 8 − 1 − 1 menyisakan 46 untuk plat yang
+                      // seharusnya 48, dan plat itu — flex item tanpa `shrink-0` — lalu
+                      // menyusut mengikuti logonya (terukur 27,98 px) alih-alih melebihi
+                      // kotaknya. Bayangan tidak memakan ruang, jadi 8 + 48 + 8 = 64 persis,
+                      // dan tebalnya boleh berubah 1 → 2 saat terpilih tanpa menggeser apa pun.
+                      "relative flex h-16 cursor-pointer items-center justify-center rounded-lg bg-card p-2 transition-control",
                       "has-[[data-slot=radio-group-item]:focus-visible]:ring-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-focus-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-background",
                       isSel
                         // `primary-text`, bukan `primary`: maroon #800000 di atas kartu gelap
                         // #1a1a1a cuma 1,59:1 (SC 1.4.11 minta 3:1), dan radio ubin bank
-                        // `sr-only` sehingga tepi + wash ini satu-satunya penanda bank terpilih.
-                        // Wash 5 % mengikuti `Card/Pilihan` supaya dua lapis pilihan di layar
-                        // yang sama memakai bahasa "terpilih" yang sama.
-                        ? "border-2 border-primary-text bg-primary-text/5"
-                        : "border-border hover:border-primary-text/40",
+                        // tersembunyi sehingga tepi + wash ini satu-satunya penanda bank
+                        // terpilih. Wash 5 % mengikuti `Card/Pilihan` supaya dua lapis pilihan
+                        // di layar yang sama memakai bahasa "terpilih" yang sama.
+                        ? "bg-primary-text/5 shadow-[inset_0_0_0_2px_var(--color-primary-text)]"
+                        : "shadow-[inset_0_0_0_1px_var(--color-border)] hover:shadow-[inset_0_0_0_1px_var(--color-primary-text)]",
                     )}
                   >
-                    <RadioGroupItem value={b} id={id} aria-label={b} className="sr-only" />
+                    {/* Pembungkus `sr-only`, bukan `className="sr-only"` di itemnya.
+                        `RadioGroupItem` membawa `relative size-5` di kelas dasarnya, dan
+                        `sr-only` tidak menang atas keduanya (tailwind-merge menganggapnya grup
+                        lain, lalu urutan CSS yang memutuskan). Akibatnya radio 20 px itu tetap
+                        ikut tata letak dan mendorong logo 11 px ke bawah dari pusat ubin —
+                        persis "logo nggak pas tengah kotak". Span pembungkus tak punya kelas
+                        yang bertabrakan, jadi ia benar-benar keluar dari alur. */}
+                    <span className="sr-only">
+                      <RadioGroupItem value={b} id={id} aria-label={b} />
+                    </span>
                     {brand.logo ? (
-                      <span className="flex h-12 w-full items-center justify-center rounded-md bg-white px-2">
+                      <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={brand.logo}
-                          alt={b}
-                          className="max-h-7 w-auto max-w-full object-contain"
+                          alt={brand.name}
+                          // 24 px, tinggi logo di Figma (`2639:32220`), di tengah plat 48.
+                          className="max-h-6 w-auto max-w-full object-contain"
                         />
                       </span>
                     ) : (
-                      <>
-                        <span className="flex h-9 w-full items-center justify-center rounded-md border border-border bg-white px-2">
-                          <span
-                            className="text-xs font-extrabold tracking-tight"
-                            style={{ color: brand.bg }}
-                          >
-                            {brand.mark}
-                          </span>
+                      <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
+                        <span
+                          className="text-sm font-extrabold tracking-tight"
+                          style={{ color: brand.bg }}
+                        >
+                          {brand.mark}
                         </span>
-                        <span className="text-xs font-medium text-foreground">{b}</span>
-                      </>
+                      </span>
                     )}
                   </label>
                 );
@@ -346,7 +387,9 @@ export function PaymentMethodSelector({
         </p>
       )}
 
-      <div className="flex flex-col gap-2">
+      {/* gap 16, bukan 8: Figma menaruh baris tombol (`2639:31852`, berakhir di y 581) dan teks
+          bantunya (`2639:31862`, y 597) pada irama 16 yang sama dengan seluruh isi kartu. */}
+      <div className="flex flex-col gap-4">
         <div className="flex gap-3">
           <Button
             type="button"
