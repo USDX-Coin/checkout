@@ -102,7 +102,14 @@ export function PartnerBankPicker({
                   active ? "" : "border-border hover:border-foreground/30",
                 )}
               >
-                <RadioGroupItem value={bank} id={id} aria-label={bank} className="sr-only" />
+                {/* Pembungkus `sr-only`, bukan `className="sr-only"` di itemnya: kelas dasar
+                    `RadioGroupItem` membawa `relative size-5`, dan `sr-only` kalah dari
+                    keduanya (tailwind-merge menganggapnya grup lain, urutan CSS yang
+                    memutuskan). Radio 20 px itu lalu ikut tata letak dan menggeser logo bank
+                    dari tengah ubinnya. Span pembungkus tak punya kelas yang bertabrakan. */}
+                <span className="sr-only">
+                  <RadioGroupItem value={bank} id={id} aria-label={bank} />
+                </span>
                 {brand?.logo ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
