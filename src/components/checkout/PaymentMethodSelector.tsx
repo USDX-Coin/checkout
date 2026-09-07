@@ -153,10 +153,28 @@ export function PaymentMethodSelector({
   // Dua daftar, dua nasib (USDX-622). `banks` bisa dipilih; `disabledBanks` cuma ditampilkan.
   // Diurutkan lewat sortVaBanks yang sama supaya bank tidak berpindah tempat antar poll GET —
   // alasan urutan itu dipatok di FE sejak awal.
-  const activeBanks = sortVaBanks(selected?.banks ?? []);
+  //
+  // Yang mati MENANG atas yang hidup kalau backend mengirim bank yang sama di kedua daftar.
+  // Tanpa pengurangan ini, satu bank tampil dua kali dengan dua nasib di layar yang sama, dan
+  // yang menang adalah salinan yang bisa diklik — persis bank yang kita tahu akan gagal di
+  // `create-va`. Menolak sesuatu yang mestinya boleh cuma merepotkan; menerima sesuatu yang
+  // mestinya ditolak memakan uang orang.
   const comingSoonBanks = sortVaBanks(selected?.disabledBanks ?? []);
+  const comingSoonSet = new Set<VaBank>(comingSoonBanks);
+  const activeBanks = sortVaBanks(selected?.banks ?? []).filter((b) => !comingSoonSet.has(b));
 
-  const needsBank = channel === "VA" && !bank;
+  // Pilihan bank direkonsiliasi tiap render, bukan cuma di-reset saat metode berganti.
+  // `channels[]` datang dari GET yang bisa dimuat ulang: bank yang tadi hidup bisa berpindah ke
+  // `disabledBanks` sesudah user memilihnya. Ubinnya lenyap dari layar tapi `bank` tetap
+  // memegangnya, tombol bayar tetap hidup, dan `onPay` mengirim bank yang sudah mati tanpa
+  // seorang pun melihatnya.
+  const effectiveBank = bank !== null && activeBanks.includes(bank) ? bank : null;
+
+  // VA yang tak menyisakan satu bank pun yang bisa dipilih bukan "belum memilih" — tak ada yang
+  // bisa dipilih. Menyuruh orang "Pilih bank dulu untuk lanjut" di layar tanpa satu pun bank
+  // adalah perintah yang mustahil dituruti.
+  const noBankSelectable = channel === "VA" && activeBanks.length === 0;
+  const needsBank = channel === "VA" && effectiveBank === null;
   const canPay = channel !== null && !needsBank && !isPaying;
 
   // Temuan D4: angka yang benar-benar harus dibayar dulu baru muncul SETELAH kartu metode
@@ -260,16 +278,23 @@ export function PaymentMethodSelector({
             keyboard mendarat di lingkaran yang tak terlihat. */}
         {selected?.channel === "VA" && (activeBanks.length > 0 || comingSoonBanks.length > 0) && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.chooseBankLabel}</p>
+            <p className="text-xs text-muted-foreground">
+              {noBankSelectable ? CHECKOUT_COPY.noBankAvailableLabel : CHECKOUT_COPY.chooseBankLabel}
+            </p>
+            {/* Radiogroup tanpa satu pun opsi tetap diumumkan pembaca layar sebagai grup yang
+                bisa dipilih. Kalau tak ada yang bisa dipilih, grupnya tidak dirender sama
+                sekali — yang tersisa cuma daftar "segera hadir" di bawahnya, yang memang
+                menjelaskan keadaannya. */}
+            {activeBanks.length > 0 && (
             <RadioGroup
-              value={bank ?? ""}
+              value={effectiveBank ?? ""}
               onValueChange={(v) => setBank(v as VaBank)}
               aria-label={CHECKOUT_COPY.chooseBankLabel}
               className="grid-cols-3 gap-2"
             >
               {activeBanks.map((b) => {
                 const brand = BANK_BRAND[b];
-                const isSel = bank === b;
+                const isSel = effectiveBank === b;
                 const id = `bank-${b}`;
                 return (
                   <label
@@ -304,14 +329,14 @@ export function PaymentMethodSelector({
                         persis "logo nggak pas tengah kotak". Span pembungkus tak punya kelas
                         yang bertabrakan, jadi ia benar-benar keluar dari alur. */}
                     <span className="sr-only">
-                      <RadioGroupItem value={b} id={id} aria-label={b} />
+                      <RadioGroupItem value={b} id={id} aria-label={brand?.name ?? b} />
                     </span>
-                    {brand.logo ? (
+                    {brand?.logo ? (
                       <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={brand.logo}
-                          alt={brand.name}
+                          src={brand.logo!}
+                          alt={brand?.name ?? b}
                           // 24 px, tinggi logo di Figma (`2639:32220`), di tengah plat 48.
                           className="max-h-6 w-auto max-w-full object-contain"
                         />
@@ -320,9 +345,9 @@ export function PaymentMethodSelector({
                       <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
                         <span
                           className="text-sm font-extrabold tracking-tight"
-                          style={{ color: brand.bg }}
+                          style={{ color: brand?.bg }}
                         >
-                          {brand.mark}
+                          {brand?.mark ?? b}
                         </span>
                       </span>
                     )}
@@ -330,6 +355,7 @@ export function PaymentMethodSelector({
                 );
               })}
             </RadioGroup>
+            )}
 
             {/* Bank yang belum diaktifkan penyedia (USDX-622). Ditampilkan, bukan disembunyikan:
                 disembunyikan, pemegang rekening BNI/Mandiri/BRI mengira banknya tidak dilayani
@@ -477,7 +503,7 @@ export function PaymentMethodSelector({
             disabled={!canPay}
             loading={isPaying}
             loadingLabel="Memproses…"
-            onClick={() => channel && onPay(channel, bank)}
+            onClick={() => channel && onPay(channel, effectiveBank)}
           >
             {CHECKOUT_COPY.payCta}
           </Button>
@@ -488,7 +514,11 @@ export function PaymentMethodSelector({
             di bawahnya mati. */}
         {(needsBank || channel === null) && (
           <p className="text-center text-xs text-muted-foreground">
-            {needsBank ? CHECKOUT_COPY.pickBankHint : CHECKOUT_COPY.pickMethodHint}
+            {noBankSelectable
+              ? CHECKOUT_COPY.noBankAvailableHint
+              : needsBank
+                ? CHECKOUT_COPY.pickBankHint
+                : CHECKOUT_COPY.pickMethodHint}
           </p>
         )}
       </div>

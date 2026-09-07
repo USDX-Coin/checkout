@@ -14,17 +14,22 @@ const VA: MintChannelOption = { channel: "VA", pgFeeIdr: "4000", banks: ["BCA", 
 const QRIS: MintChannelOption = { channel: "QRIS", pgFeeIdr: "4000", banks: null };
 const QRIS_MAHAL: MintChannelOption = { channel: "QRIS", pgFeeIdr: "5500", banks: null };
 
-function renderSelector(channels: MintChannelOption[]) {
-  return render(
-    <PaymentMethodSelector
-      channels={channels}
-      totalBeforePgFeeIdr="162500"
-      isPaying={false}
-      payError={null}
-      onPay={vi.fn()}
-      onCancel={vi.fn()}
-    />,
-  );
+function renderSelector(channels: MintChannelOption[], onPay = vi.fn()) {
+  const props = {
+    totalBeforePgFeeIdr: "162500",
+    isPaying: false,
+    payError: null,
+    onPay,
+    onCancel: vi.fn(),
+  };
+  const view = render(<PaymentMethodSelector channels={channels} {...props} />);
+  return {
+    ...view,
+    onPay,
+    /** Muat ulang dengan `channels[]` baru, meniru respons GET berikutnya. */
+    repoll: (next: MintChannelOption[]) =>
+      view.rerender(<PaymentMethodSelector channels={next} {...props} />),
+  };
 }
 
 describe("total bayar terbaca sejak awal (D4)", () => {
@@ -251,7 +256,9 @@ describe("urutan bank ditentukan di sini, bukan oleh urutan respons", () => {
       const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
         el.getAttribute("aria-label"),
       );
-      expect(nama).toEqual(["MANDIRI", "BRI", "BNI"]);
+      // Nama yang dibacakan = nama yang tertulis ("Mandiri", bukan enum "MANDIRI"), sama dengan
+      // keterangan kartu dan daftar bank yang belum aktif. Satu bank, satu sebutan di satu layar.
+      expect(nama).toEqual(["Mandiri", "BRI", "BNI"]);
     });
 
     test("keterangan kartu VA memakai nama yang dibaca orang, urut sama", () => {
@@ -298,7 +305,7 @@ describe("bank yang belum aktif (USDX-622)", () => {
       renderSelector([VA_NOBU]);
       fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
 
-      const nobu = screen.getByRole("radio", { name: "NOBU" });
+      const nobu = screen.getByRole("radio", { name: "Nobu" });
       fireEvent.click(nobu);
       expect(nobu).toBeChecked();
     });
@@ -313,7 +320,7 @@ describe("bank yang belum aktif (USDX-622)", () => {
       const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
         el.getAttribute("aria-label"),
       );
-      expect(nama).toEqual(["NOBU"]);
+      expect(nama).toEqual(["Nobu"]);
     });
 
     test("keterangan kartu hanya menyebut bank yang benar-benar bisa dipakai", () => {
@@ -334,5 +341,95 @@ describe("bank yang belum aktif (USDX-622)", () => {
         screen.queryByRole("list", { name: "Bank yang belum tersedia" }),
       ).not.toBeInTheDocument();
     });
+  });
+});
+
+// Tiga kelas kegagalan yang ditemukan verifikasi netral PR #30. Semuanya lolos CI hijau, jadi
+// tesnya ditulis di sini supaya tidak bisa kembali diam-diam.
+describe("bank yang belum aktif · jalur yang sempat bocor (USDX-622)", () => {
+  const NOBU_ONLY: MintChannelOption = {
+    channel: "VA",
+    pgFeeIdr: "4000",
+    banks: ["NOBU", "BNI"],
+    disabledBanks: [],
+  };
+  const BNI_DIMATIKAN: MintChannelOption = {
+    channel: "VA",
+    pgFeeIdr: "4000",
+    banks: ["NOBU"],
+    disabledBanks: ["BNI"],
+  };
+
+  function pilihVa() {
+    fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
+  }
+
+  // Halaman ini memuat ulang `channels[]`: bank yang tadi hidup bisa berpindah ke `disabledBanks`
+  // SESUDAH orang memilihnya. Ubinnya lenyap dari layar, tapi state-nya tidak ikut lenyap.
+  test("bank yang dimatikan setelah dipilih tidak ikut terkirim ke onPay", () => {
+    const { onPay, repoll } = renderSelector([NOBU_ONLY]);
+    pilihVa();
+    fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
+
+    repoll([BNI_DIMATIKAN]);
+
+    const bayar = screen.getByRole("button", { name: /bayar sekarang/i });
+    expect(bayar).toBeDisabled();
+    fireEvent.click(bayar);
+    expect(onPay).not.toHaveBeenCalled();
+  });
+
+  // Satu bank, dua nasib di layar yang sama. Yang menang harus yang mati: menolak sesuatu yang
+  // mestinya boleh cuma merepotkan, menerima sesuatu yang mestinya ditolak memakan uang orang.
+  test("bank yang muncul di kedua daftar tidak bisa dipilih", () => {
+    renderSelector([
+      { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU", "BNI"], disabledBanks: ["BNI"] },
+    ]);
+    pilihVa();
+
+    expect(screen.queryByRole("radio", { name: "BNI" })).not.toBeInTheDocument();
+    const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
+    expect(within(daftar).getByText("BNI")).toBeInTheDocument();
+  });
+
+  // Terjangkau begitu penyedia mematikan Nobu juga — persis mekanisme yang tiket ini bangun.
+  test("tanpa satu pun bank aktif, tidak ada perintah yang mustahil dituruti", () => {
+    renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: [], disabledBanks: ["BNI", "NOBU"] }]);
+    pilihVa();
+
+    expect(screen.queryByRole("radiogroup", { name: "Pilih bank" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Pilih bank dulu untuk lanjut.")).not.toBeInTheDocument();
+    expect(screen.getByText(/Belum ada bank yang bisa dipakai/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /bayar sekarang/i })).toBeDisabled();
+  });
+
+  // Keputusan utama tiket ini: NOBU dibaca lebih dulu karena satu-satunya yang bisa diklik.
+  // Sebelumnya tidak ada satu pun tes yang merah kalau urutannya dicabut.
+  test("NOBU dibacakan paling depan di antara bank yang aktif", () => {
+    renderSelector([
+      { channel: "VA", pgFeeIdr: "4000", banks: ["BNI", "MANDIRI", "NOBU", "BRI"] },
+    ]);
+    pilihVa();
+
+    const grup = screen.getByRole("radiogroup", { name: "Pilih bank" });
+    const urutan = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
+      el.getAttribute("value"),
+    );
+    expect(urutan[0]).toBe("NOBU");
+  });
+
+  // Daftar mati ikut diurutkan karena alasan yang sama dengan daftar hidup: halaman ini memuat
+  // ulang, dan urutan respons yang bergeser menukar ubin di bawah jari orang.
+  test("daftar bank mati ikut urutan yang dipatok, bukan urutan respons", () => {
+    renderSelector([
+      { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"], disabledBanks: ["BNI", "BRI", "MANDIRI"] },
+    ]);
+    pilihVa();
+
+    const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
+    const urutan = Array.from(daftar.querySelectorAll("li")).map(
+      (li) => li.textContent?.replace("Segera hadir", "") ?? "",
+    );
+    expect(urutan).toEqual(["Mandiri", "BRI", "BNI"]);
   });
 });

@@ -116,6 +116,11 @@ export const CHECKOUT_COPY = {
   // pembaca layar mengumumkan dua "Pilih bank" berturut-turut, dan yang kedua justru tidak bisa
   // dipilih.
   bankComingSoonListLabel: "Bank yang belum tersedia",
+  // Dipakai saat TIDAK ADA bank yang bisa dipilih sama sekali (penyedia mematikan semuanya).
+  // "Pilih bank dulu untuk lanjut" di layar tanpa satu pun bank adalah perintah yang mustahil
+  // dituruti, dan orang akan mencari kesalahan pada dirinya sendiri.
+  noBankAvailableLabel: "Bank",
+  noBankAvailableHint: "Belum ada bank yang bisa dipakai sekarang. Coba lagi sebentar.",
 
   // ── Pilih metode · bentuk Figma A1a/A1b (`2639:31770`, `2639:32156`) ───────────────────────
   methodGroupLabel: "Metode pembayaran",
