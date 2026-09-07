@@ -109,6 +109,13 @@ export const CHECKOUT_COPY = {
   // Judul grup radio kedua (Figma `50` blok A, state A1b). Sekaligus nama grup yang dibacakan
   // pembaca layar lewat `aria-label`.
   chooseBankLabel: "Pilih bank",
+  // Bank yang tampil tapi belum bisa dipilih (USDX-622). Kata yang sama dengan Bridge dan Send di
+  // aplikasi, supaya "belum sekarang, tapi akan ada" cuma punya satu bunyi di seluruh produk.
+  bankComingSoonLabel: "Segera hadir",
+  // Daftarnya diberi nama sendiri, bukan ikut "Pilih bank": dua wilayah bernama sama membuat
+  // pembaca layar mengumumkan dua "Pilih bank" berturut-turut, dan yang kedua justru tidak bisa
+  // dipilih.
+  bankComingSoonListLabel: "Bank yang belum tersedia",
 
   // ── Pilih metode · bentuk Figma A1a/A1b (`2639:31770`, `2639:32156`) ───────────────────────
   methodGroupLabel: "Metode pembayaran",

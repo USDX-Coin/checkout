@@ -2,7 +2,7 @@
 // untuk pemilih metode saat GET /v2/mint/{id} tidak mengembalikan channels[] (mis.
 // backend lama tanpa USDX-216).
 export const VA_BANKS = [
-  "BCA", "BNI", "BRI", "CIMB", "DANAMON", "INA", "MANDIRI", "PERMATA", "MAYBANK",
+  "BCA", "BNI", "BRI", "CIMB", "DANAMON", "INA", "MANDIRI", "PERMATA", "MAYBANK", "NOBU",
 ] as const;
 
 // Urutan TAMPIL bank di lapis "Pilih bank" dan di keterangan kartu Virtual Account.
@@ -13,7 +13,10 @@ export const VA_BANKS = [
 // mengikuti Figma A1b (`2639:32217`: Mandiri → BRI → BNI). Bank yang tidak disebut di daftar
 // ini tetap tampil, di belakang, dengan urutan apa adanya dari backend — daftar ini mengatur
 // prioritas, bukan menyaring.
-export const VA_BANK_ORDER = ["MANDIRI", "BRI", "BNI"] as const;
+// NOBU di depan (USDX-622): per 7 Sep 2026 itu satu-satunya bank yang benar-benar bisa dipakai —
+// tiga sisanya menunggu aktivasi DurianPay dan tampil dalam keadaan mati. Yang bisa diklik pantas
+// dibaca lebih dulu.
+export const VA_BANK_ORDER = ["NOBU", "MANDIRI", "BRI", "BNI"] as const;
 
 export function sortVaBanks<T extends string>(banks: readonly T[]): T[] {
   const rank = (b: T) => {
@@ -42,6 +45,9 @@ export const BANK_BRAND: Record<
   MANDIRI: { bg: "#003D79", fg: "#ffffff", mark: "MDR", name: "Mandiri", logo: "/image/banks/mandiri.svg" },
   PERMATA: { bg: "#00945E", fg: "#ffffff", mark: "PRM", name: "Permata", logo: "/image/banks/permata.svg" },
   MAYBANK: { bg: "#FFC400", fg: "#1A1A1A", mark: "MBK", name: "Maybank", logo: "/image/banks/maybank.svg" },
+  // Tanpa `logo`: aset resmi Nobu belum ada di public/image/banks/. Fallback wordmark memang
+  // disediakan `BANK_BRAND` untuk kasus ini, jadi banknya tetap tampil rapi sambil menunggu aset.
+  NOBU: { bg: "#0B3B8C", fg: "#ffffff", mark: "NOBU", name: "Nobu" },
 };
 
 // Merah brand QRIS untuk badge/kartu instruksi QRIS.

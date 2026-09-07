@@ -27,6 +27,7 @@
 import { useState } from "react";
 import { Landmark, Lock, QrCode } from "lucide-react";
 import type { MintChannelOption, PaymentChannel, VaBank } from "@/types";
+import { Badge } from "@/components/ui/badge";
 import { BANK_BRAND, QRIS_RED, sortVaBanks } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
 import { Button } from "@/components/ui/button";
@@ -148,6 +149,13 @@ export function PaymentMethodSelector({
   }
 
   const selected = channels.find((c) => c.channel === channel) ?? null;
+
+  // Dua daftar, dua nasib (USDX-622). `banks` bisa dipilih; `disabledBanks` cuma ditampilkan.
+  // Diurutkan lewat sortVaBanks yang sama supaya bank tidak berpindah tempat antar poll GET —
+  // alasan urutan itu dipatok di FE sejak awal.
+  const activeBanks = sortVaBanks(selected?.banks ?? []);
+  const comingSoonBanks = sortVaBanks(selected?.disabledBanks ?? []);
+
   const needsBank = channel === "VA" && !bank;
   const canPay = channel !== null && !needsBank && !isPaying;
 
@@ -250,7 +258,7 @@ export function PaymentMethodSelector({
             tepi brand + wash saat terpilih); radionya sendiri disembunyikan secara visual, dan
             yang membawa cincin fokus adalah ubinnya lewat `has-[...]`. Tanpa itu, fokus
             keyboard mendarat di lingkaran yang tak terlihat. */}
-        {selected?.channel === "VA" && selected.banks && selected.banks.length > 0 && (
+        {selected?.channel === "VA" && (activeBanks.length > 0 || comingSoonBanks.length > 0) && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.chooseBankLabel}</p>
             <RadioGroup
@@ -259,7 +267,7 @@ export function PaymentMethodSelector({
               aria-label={CHECKOUT_COPY.chooseBankLabel}
               className="grid-cols-3 gap-2"
             >
-              {sortVaBanks(selected.banks).map((b) => {
+              {activeBanks.map((b) => {
                 const brand = BANK_BRAND[b];
                 const isSel = bank === b;
                 const id = `bank-${b}`;
@@ -322,6 +330,58 @@ export function PaymentMethodSelector({
                 );
               })}
             </RadioGroup>
+
+            {/* Bank yang belum diaktifkan penyedia (USDX-622). Ditampilkan, bukan disembunyikan:
+                disembunyikan, pemegang rekening BNI/Mandiri/BRI mengira banknya tidak dilayani
+                dan pergi — padahal Nobu open-loop dan bisa dibayar dari bank mana pun, dan
+                ketiganya sedang dalam proses aktivasi.
+
+                Grid terpisah, bukan ubin mati di dalam RadioGroup: radio yang tak bisa dipilih
+                tetap ikut urutan panah keyboard dan tetap dibacakan sebagai pilihan. Sebagai
+                daftar biasa, ia terbaca apa adanya — keterangan, bukan pilihan. */}
+            {comingSoonBanks.length > 0 && (
+              <ul className="grid grid-cols-3 gap-2" aria-label={CHECKOUT_COPY.bankComingSoonListLabel}>
+                {comingSoonBanks.map((b) => {
+                  const brand = BANK_BRAND[b];
+                  return (
+                    <li key={b} className="flex flex-col items-center gap-1">
+                      <div
+                        aria-hidden="true"
+                        className="relative flex h-16 w-full items-center justify-center rounded-lg bg-card p-2 opacity-50 shadow-[inset_0_0_0_1px_var(--color-border)]"
+                      >
+                        <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
+                          {brand?.logo ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={brand.logo}
+                              alt=""
+                              className="max-h-6 w-auto max-w-full object-contain grayscale"
+                            />
+                          ) : (
+                            <span
+                              className="text-sm font-extrabold tracking-tight"
+                              style={{ color: brand?.bg }}
+                            >
+                              {brand?.mark ?? b}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {/* Nama banknya ikut dibacakan di sini, bukan cuma di gambar yang
+                          `aria-hidden`, supaya pembaca layar tetap tahu bank apa yang belum ada.
+                          Badge `coming-soon` yang sama dengan tombol Bridge/Send — satu bunyi
+                          untuk "belum sekarang, tapi akan ada" di seluruh produk. */}
+                      <span className="flex flex-col items-center gap-1">
+                        <span className="text-[11px] leading-none text-muted-foreground">
+                          {brand?.name ?? b}
+                        </span>
+                        <Badge tone="coming-soon">{CHECKOUT_COPY.bankComingSoonLabel}</Badge>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         )}
       </div>

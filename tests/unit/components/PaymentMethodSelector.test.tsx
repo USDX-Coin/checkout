@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
 import type { MintChannelOption } from "@/types";
 
@@ -264,6 +264,75 @@ describe("urutan bank ditentukan di sini, bukan oleh urutan respons", () => {
     test("bank di luar daftar urutan tetap tampil, di belakang", () => {
       renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BCA", "BNI", "MANDIRI"] }]);
       expect(screen.getByText("Mandiri · BNI · BCA")).toBeInTheDocument();
+    });
+  });
+});
+
+
+// USDX-622 — bank yang belum diaktifkan penyedia tetap tampil, tapi tidak bisa dipilih.
+//
+// Menyembunyikan dan menawarkan sama-sama merugikan: disembunyikan, pemegang rekening BNI/Mandiri/
+// BRI mengira banknya tidak dilayani dan pergi; ditawarkan hidup, ia gagal tepat setelah menekan
+// bayar. Yang dijaga tes ini: keduanya terlihat, hanya satu yang bisa diklik.
+describe("bank yang belum aktif (USDX-622)", () => {
+  const VA_NOBU: MintChannelOption = {
+    channel: "VA",
+    pgFeeIdr: "4000",
+    banks: ["NOBU"],
+    disabledBanks: ["BNI", "MANDIRI", "BRI"],
+  };
+
+  describe("positive", () => {
+    test("ketiganya tampil dengan nama bank dan label Segera hadir", () => {
+      renderSelector([VA_NOBU]);
+      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
+
+      const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
+      for (const nama of ["BNI", "Mandiri", "BRI"]) {
+        expect(within(daftar).getByText(nama)).toBeInTheDocument();
+      }
+      expect(within(daftar).getAllByText("Segera hadir")).toHaveLength(3);
+    });
+
+    test("bank yang aktif tetap bisa dipilih", () => {
+      renderSelector([VA_NOBU]);
+      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
+
+      const nobu = screen.getByRole("radio", { name: "NOBU" });
+      fireEvent.click(nobu);
+      expect(nobu).toBeChecked();
+    });
+  });
+
+  describe("negative", () => {
+    test("bank yang belum aktif tidak jadi pilihan radio sama sekali", () => {
+      renderSelector([VA_NOBU]);
+      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
+
+      const grup = screen.getByRole("radiogroup", { name: "Pilih bank" });
+      const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
+        el.getAttribute("aria-label"),
+      );
+      expect(nama).toEqual(["NOBU"]);
+    });
+
+    test("keterangan kartu hanya menyebut bank yang benar-benar bisa dipakai", () => {
+      renderSelector([VA_NOBU]);
+      expect(screen.getByText("Nobu")).toBeInTheDocument();
+      expect(screen.queryByText(/Nobu · BNI/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("edge cases", () => {
+    // Dicari lewat nama daftarnya, bukan lewat teks "Segera hadir": layar ini sudah punya kartu
+    // "Transfer bank BNI" dengan badge yang sama, jadi mencari teksnya di seluruh dokumen akan
+    // selalu ketemu dan tidak membuktikan apa pun.
+    test("tanpa disabledBanks, daftar bank yang belum aktif tidak dirender", () => {
+      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"] }]);
+      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
+      expect(
+        screen.queryByRole("list", { name: "Bank yang belum tersedia" }),
+      ).not.toBeInTheDocument();
     });
   });
 });
