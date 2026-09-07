@@ -2,23 +2,23 @@
 // Mirror kontrak OpenAPI (sot/api/mint.yaml, common.yaml). Checkout hanya butuh
 // detail order (GET) + pilih channel (pay); field backend-only diabaikan.
 
+import type { VA_BANKS } from "@/lib/constants";
+
 export type PaymentChannel = "VA" | "QRIS";
 
 // Apakah pembayaran order ini benar-benar diproses ke bank, atau cuma disimulasikan mock
 // provider. Dikirim backend (mint-order.serializer.ts), diturunkan dari provider per-order.
 export type PaymentMode = "SIMULATION" | "LIVE";
 
-// 9 bank VA yang didukung provider (common.yaml VaBank).
-export type VaBank =
-  | "BCA"
-  | "BNI"
-  | "BRI"
-  | "CIMB"
-  | "DANAMON"
-  | "INA"
-  | "MANDIRI"
-  | "PERMATA"
-  | "MAYBANK";
+// Bank VA yang dikenal provider (common.yaml VaBank).
+//
+// Diturunkan dari `VA_BANKS`, bukan ditulis ulang: keduanya sempat berbeda saat NOBU masuk
+// (USDX-622) — nilainya bertambah, tipenya tidak — dan bank barunya jadi tidak bisa disebut di
+// kode yang mengetik `VaBank`. Satu daftar, dua bentuk.
+//
+// "Dikenal" bukan "aktif": bank yang benar-benar bisa dipakai ditentukan backend lewat
+// `channels[].banks`, dan yang tampil tapi mati lewat `channels[].disabledBanks`.
+export type VaBank = (typeof VA_BANKS)[number];
 
 export type AmountCurrency = "USD" | "IDR";
 export type ConsumerOrderType = "MINT" | "REDEEM";
@@ -47,6 +47,12 @@ export interface MintChannelOption {
   channel: PaymentChannel;
   pgFeeIdr: string;
   banks: VaBank[] | null;
+  // Bank yang DITAMPILKAN tapi belum bisa dipilih — ditandai "Segera hadir" (USDX-622).
+  //
+  // Datang dari backend, bukan ditulis di sini, karena DurianPay mengaktifkan bank satu per satu:
+  // tiap aktivasi cukup satu perubahan di server dan halaman ini ikut sendiri. Opsional — response
+  // tanpa field ini (adapter mock/BNI) berperilaku persis seperti sebelumnya.
+  disabledBanks?: VaBank[];
 }
 
 // Detail order mint (GET /v2/mint/{id} + setelah /pay). View model FE — field

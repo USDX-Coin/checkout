@@ -82,6 +82,11 @@ export interface PartnerCopy {
   chooseBankHeading: string;
   vaMethodLabel: string;
   bankListNote: string;
+  /** Dipakai menggantikan `bankListNote` saat ada bank yang tampil tapi belum bisa dipilih —
+   *  "Hanya bank di atas yang tersedia" jadi bohong begitu ada ubin mati di layar. */
+  bankListNoteWithComingSoon: string;
+  bankComingSoonLabel: string;
+  bankComingSoonListLabel: string;
   totalPlusFeeLabel: string;
   payNowCta: string;
 
@@ -189,6 +194,10 @@ export function partnerCopy(
     chooseBankHeading: "Pilih bank untuk virtual account",
     vaMethodLabel: "Transfer bank (virtual account)",
     bankListNote: "Hanya bank di atas yang tersedia. Daftarnya diambil saat halaman dibuka.",
+    bankListNoteWithComingSoon:
+      "Bank yang berlabel \u201CSegera hadir\u201D belum bisa dipakai. Daftarnya diambil saat halaman dibuka.",
+    bankComingSoonLabel: "Segera hadir",
+    bankComingSoonListLabel: "Bank yang belum tersedia",
     totalPlusFeeLabel: "Total + biaya",
     payNowCta: "Bayar sekarang",
 
