@@ -52,7 +52,15 @@ export function PartnerBankPicker({
   onConfirm,
 }: PartnerBankPickerProps) {
   const va = channels.find((c) => c.channel === "VA") ?? null;
-  const banks = va?.banks ?? [];
+  // Sama seperti jalur konsumen (USDX-622): yang mati menang kalau backend mengirim bank yang
+  // sama di kedua daftar, supaya tidak ada bank yang bisa diklik sekaligus dilabeli belum siap.
+  const comingSoon = va?.disabledBanks ?? [];
+  const comingSoonSet = new Set<VaBank>(comingSoon);
+  const banks = (va?.banks ?? []).filter((b) => !comingSoonSet.has(b));
+  // Pilihan direkonsiliasi tiap render: halaman partner mem-poll GET, jadi bank yang tadi hidup
+  // bisa pindah ke `disabledBanks` sesudah customer memilihnya. Tanpa ini ubinnya lenyap tapi
+  // tombol bayar tetap hidup dan mengirim bank yang sudah mati.
+  const effectiveSelected = selected !== null && banks.includes(selected) ? selected : null;
 
   const pgFee =
     va && va.pgFeeIdr && Number.isFinite(Number(va.pgFeeIdr)) ? Number(va.pgFeeIdr) : null;
@@ -82,14 +90,14 @@ export function PartnerBankPicker({
         </div>
 
         <RadioGroup
-          value={selected ?? ""}
+          value={effectiveSelected ?? ""}
           onValueChange={(v) => onSelect(v as VaBank)}
           aria-label={copy.chooseBankHeading}
           className="grid-cols-3 gap-2"
         >
           {banks.map((bank) => {
             const brand = BANK_BRAND[bank];
-            const active = selected === bank;
+            const active = effectiveSelected === bank;
             const id = `partner-bank-${bank}`;
             return (
               <label
@@ -108,7 +116,7 @@ export function PartnerBankPicker({
                     memutuskan). Radio 20 px itu lalu ikut tata letak dan menggeser logo bank
                     dari tengah ubinnya. Span pembungkus tak punya kelas yang bertabrakan. */}
                 <span className="sr-only">
-                  <RadioGroupItem value={bank} id={id} aria-label={bank} />
+                  <RadioGroupItem value={bank} id={id} aria-label={brand?.name ?? bank} />
                 </span>
                 {brand?.logo ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
@@ -128,7 +136,35 @@ export function PartnerBankPicker({
           })}
         </RadioGroup>
 
-        <p className="text-xs leading-relaxed text-muted-foreground">{copy.bankListNote}</p>
+        {comingSoon.length > 0 && (
+          <ul
+            className="grid grid-cols-3 gap-2"
+            aria-label={copy.bankComingSoonListLabel}
+          >
+            {comingSoon.map((bank) => {
+              const brand = BANK_BRAND[bank];
+              return (
+                <li
+                  key={bank}
+                  className="flex h-14 flex-col items-center justify-center gap-1 rounded-lg border-2 border-border bg-white/60 px-2 opacity-60"
+                >
+                  {/* Namanya node teks sungguhan, bukan cuma `alt` di gambar yang aria-hidden:
+                      pembaca layar tetap harus tahu bank apa yang belum ada. */}
+                  <span className="text-[11px] leading-none font-semibold text-[#1a1a1a]">
+                    {brand?.name ?? bank}
+                  </span>
+                  <span className="text-[10px] leading-none text-muted-foreground">
+                    {copy.bankComingSoonLabel}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {comingSoon.length > 0 ? copy.bankListNoteWithComingSoon : copy.bankListNote}
+        </p>
       </PartnerCard>
 
       {total !== null && (
@@ -145,7 +181,10 @@ export function PartnerBankPicker({
       )}
 
       <div className="mt-auto pt-3">
-        <PartnerBrandButton onClick={onConfirm} disabled={!selected || isPaying}>
+        {/* `effectiveSelected`, bukan `selected`: induknya memanggil `state.pay(bank)` dengan
+            state-nya sendiri, jadi satu-satunya yang menahan bank basi terkirim adalah tombol
+            ini tidak pernah bisa diklik saat pilihannya sudah tidak sah. */}
+        <PartnerBrandButton onClick={onConfirm} disabled={!effectiveSelected || isPaying}>
           {isPaying ? "Memproses…" : copy.payNowCta}
         </PartnerBrandButton>
       </div>

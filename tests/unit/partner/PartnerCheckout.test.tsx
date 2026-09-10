@@ -594,7 +594,9 @@ describe("QRIS tidak muncul sebagai pilihan di UI partner", () => {
     test("tiga bank yang didukung muncul sebagai satu grup radio", () => {
       renderBankStep();
       expect(screen.getByRole("radiogroup")).toBeInTheDocument();
-      for (const bank of ["MANDIRI", "BNI", "BRI"]) {
+      // Nama yang dibacakan = nama yang tertulis ("Mandiri", bukan enum "MANDIRI"), sama dengan
+      // jalur konsumen sesudah USDX-622.
+      for (const bank of ["Mandiri", "BNI", "BRI"]) {
         expect(screen.getByRole("radio", { name: bank })).toBeInTheDocument();
       }
     });
@@ -603,7 +605,7 @@ describe("QRIS tidak muncul sebagai pilihan di UI partner", () => {
       renderBankStep();
       fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
       expect(screen.getByRole("radio", { name: "BNI" })).toBeChecked();
-      expect(screen.getByRole("radio", { name: "MANDIRI" })).not.toBeChecked();
+      expect(screen.getByRole("radio", { name: "Mandiri" })).not.toBeChecked();
       expect(screen.getByRole("radio", { name: "BRI" })).not.toBeChecked();
     });
   });
@@ -819,6 +821,72 @@ describe("instruksi bayar VA (P03/N03)", () => {
       expect(screen.getByText("—")).toBeInTheDocument();
       const [salin] = screen.getAllByRole("button", { name: /Salin/ });
       expect(salin).toBeDisabled();
+    });
+  });
+});
+
+// ── Bank yang belum aktif, jalur partner (USDX-622) ───────────────────────────────────────────
+//
+// AC tiket: checkout partner berperilaku sama dengan jalur konsumen. Sempat tidak: `PARTNER_VA_BANKS`
+// tertinggal tanpa NOBU, `partnerChannels` membuang satu-satunya bank yang hidup, dan seluruh
+// halaman berubah jadi "Metode pembayaran belum tersedia".
+describe("bank yang belum aktif di checkout partner", () => {
+  const NOBU_AKTIF = makeOrder({
+    ...REQUESTED,
+    channels: [
+      { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"], disabledBanks: ["BNI", "MANDIRI", "BRI"] },
+    ],
+  });
+
+  function renderBankStep(order = NOBU_AKTIF) {
+    const result = renderPartner(makeSession(), { order });
+    fireEvent.click(screen.getByRole("button", { name: "Lanjut ke pembayaran" }));
+    return result;
+  }
+
+  describe("positive", () => {
+    test("halaman tetap bisa dipakai — NOBU muncul dan bisa dipilih", () => {
+      renderBankStep();
+      const nobu = screen.getByRole("radio", { name: "Nobu" });
+      fireEvent.click(nobu);
+      expect(nobu).toBeChecked();
+    });
+
+    test("tiga bank yang belum aktif tetap tampil, berlabel Segera hadir", () => {
+      renderBankStep();
+      const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
+      for (const nama of ["BNI", "Mandiri", "BRI"]) {
+        expect(within(daftar).getByText(nama)).toBeInTheDocument();
+      }
+      expect(within(daftar).getAllByText("Segera hadir")).toHaveLength(3);
+    });
+
+    // "Hanya bank di atas yang tersedia" jadi bohong begitu ada ubin mati di layar yang sama.
+    test("catatan di bawah daftar menyesuaikan diri", () => {
+      renderBankStep();
+      expect(screen.getByText(/belum bisa dipakai/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Hanya bank di atas yang tersedia/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("negative", () => {
+    test("bank yang belum aktif tidak jadi pilihan radio", () => {
+      renderBankStep();
+      const grup = screen.getByRole("radiogroup");
+      const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
+        el.getAttribute("value"),
+      );
+      expect(nama).toEqual(["NOBU"]);
+    });
+  });
+
+  describe("edge case", () => {
+    test("tanpa disabledBanks, catatan lama yang dipakai", () => {
+      renderBankStep(
+        makeOrder({ ...REQUESTED, channels: [{ channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"] }] }),
+      );
+      expect(screen.getByText(/Hanya bank di atas yang tersedia/)).toBeInTheDocument();
+      expect(screen.queryByRole("list", { name: "Bank yang belum tersedia" })).not.toBeInTheDocument();
     });
   });
 });

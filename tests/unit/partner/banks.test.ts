@@ -15,8 +15,15 @@ const QRIS: MintChannelOption = { channel: "QRIS", pgFeeIdr: "2000", banks: null
 
 describe("PARTNER_VA_BANKS", () => {
   describe("positive", () => {
-    test("tepat tiga bank, sesuai enum `MintCreate.payment_bank` di kontrak partner", () => {
-      expect([...PARTNER_VA_BANKS]).toEqual(["MANDIRI", "BNI", "BRI"]);
+    test("berisi bank yang didukung jalur partner, sesuai `MintCreate.payment_bank`", () => {
+      expect([...PARTNER_VA_BANKS]).toEqual(["MANDIRI", "BNI", "BRI", "NOBU"]);
+    });
+
+    // Tes ini ada karena daftar ini SUDAH pernah tertinggal: saat NOBU masuk (USDX-622) daftarnya
+    // tetap bertiga, `partnerChannels` membuang satu-satunya bank yang hidup, dan seluruh halaman
+    // checkout partner berubah jadi "Metode pembayaran belum tersedia" — tanpa satu tes pun merah.
+    test("NOBU termasuk — tanpanya jalur partner kehilangan satu-satunya bank yang aktif", () => {
+      expect(isPartnerVaBank("NOBU")).toBe(true);
     });
   });
 
@@ -131,6 +138,51 @@ describe("hasHostedPage", () => {
     test("tepat dua model yang punya halaman, dari tiga model yang ada", () => {
       expect([...MODELS_WITH_PAGE]).toEqual(["USDX", "NEUTRAL"]);
       expect(MODELS_WITH_PAGE).toHaveLength(2);
+    });
+  });
+});
+
+// USDX-622 — bank yang tampil tapi belum bisa dipilih, di jalur partner.
+describe("partnerChannels · bank yang belum aktif", () => {
+  const VA_NOBU: MintChannelOption = {
+    channel: "VA",
+    pgFeeIdr: "4000",
+    banks: ["NOBU"],
+    disabledBanks: ["BNI", "MANDIRI", "BRI"],
+  };
+
+  describe("positive", () => {
+    test("channel dengan NOBU saja tetap hidup, tidak dibuang", () => {
+      const [va] = partnerChannels([VA_NOBU]);
+      expect(va).toBeDefined();
+      expect(va.banks).toEqual(["NOBU"]);
+    });
+
+    test("disabledBanks ikut lewat, supaya partner menampilkan yang sama dengan konsumen", () => {
+      const [va] = partnerChannels([VA_NOBU]);
+      expect(va.disabledBanks).toEqual(["BNI", "MANDIRI", "BRI"]);
+    });
+  });
+
+  describe("negative", () => {
+    test("bank di luar daftar partner dibuang juga dari disabledBanks", () => {
+      const [va] = partnerChannels([
+        { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"], disabledBanks: ["BCA", "BNI"] },
+      ]);
+      expect(va.disabledBanks).toEqual(["BNI"]);
+    });
+
+    // Bank mati tidak menyelamatkan channel: VA tanpa satu pun bank yang bisa dipilih adalah
+    // jalan buntu yang sama, hanya lebih sopan.
+    test("VA yang hanya berisi bank mati tetap dibuang", () => {
+      expect(partnerChannels([{ channel: "VA", pgFeeIdr: "4000", banks: [], disabledBanks: ["BNI"] }])).toEqual([]);
+    });
+  });
+
+  describe("edge case", () => {
+    test("tanpa disabledBanks, field-nya tidak ditempelkan", () => {
+      const [va] = partnerChannels([{ channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"] }]);
+      expect("disabledBanks" in va).toBe(false);
     });
   });
 });
