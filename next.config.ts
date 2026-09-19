@@ -1,12 +1,10 @@
 import type { NextConfig } from "next";
 
-// Security headers dipasang di sini (BUKAN hanya di netlify.toml) karena blok
-// `[[headers]]` Netlify hanya berlaku untuk aset statis — TIDAK untuk respons SSR
-// Next.js. Terbukti via curl ke dev deploy: halaman SSR tidak mengirim
-// X-Frame-Options / CSP. `async headers()` diterapkan Next.js ke SEMUA respons
-// (SSR + statis), jadi ini yang benar-benar menutup gap clickjacking (USDX-380).
+// Security headers dipasang di sini, BUKAN di config reverse proxy, karena
+// `async headers()` diterapkan Next.js ke SEMUA respons (SSR + statis) dan ikut ke
+// mana pun halaman ini di-host — itu yang menutup gap clickjacking (USDX-380).
 //
-// Nilai disamakan dengan netlify.toml checkout + pola back-office yang live:
+// Nilai dari USDX-362:
 // halaman bayar pegang alur pembayaran + bearer token (handoff via URL hash,
 // USDX-239) → framing di-DENY penuh (checkout dicapai via top-level redirect dari
 // `app`, BUKAN iframe). CSP sengaja hanya `frame-ancestors 'none'` supaya tidak
