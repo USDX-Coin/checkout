@@ -31,5 +31,15 @@ pnpm dev
 
 ## Deploy
 
-Netlify (`mint.usdx.co.id`), branch → env: `main` = prod, `staging`, `dev`. Lihat `netlify.toml`
-+ runbook di USDX-221. Semua FE di bawah `*.usdx.co.id` (prasyarat cross-subdomain cookie).
+Server sendiri lewat pipeline Jenkins on-prem, branch → environment:
+
+| Branch | Environment | Host | Jenkins job |
+|--------|-------------|------|-------------|
+| `dev` | Development | `dev.mint.usdx.co.id` | `usdx/frontend-checkout/dev` |
+| `main` | Production | `mint.usdx.co.id` | `usdx/frontend-checkout/main` |
+
+Var `NEXT_PUBLIC_*` ter-inline saat build, jadi nilainya disuntik pipeline sebagai
+`--build-arg` (dikelola di Jenkins, bukan di repo ini). Pipeline: checkout branch →
+`docker build` pakai Dockerfile milik pipeline → push ke registry internal → deploy ke
+server via Ansible. Repo ini sengaja tidak memuat Dockerfile atau berkas deploy.
+Semua FE di bawah `*.usdx.co.id` (prasyarat cross-subdomain cookie).

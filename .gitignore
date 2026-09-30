@@ -28,8 +28,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
-# netlify
-.netlify
 
 # SoT (repo terpisah, di-clone lokal untuk rujukan kontrak API)
 sot/
