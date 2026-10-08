@@ -143,11 +143,11 @@ function OrderIdentityRows({
   return (
     <div className="flex flex-col gap-2">
       <Row label={CHECKOUT_COPY.youReceiveLabel}>
-        {/* Koin 20 px mendahului angkanya (Figma `asset/usdx-coin · 20`). `usdx-coin.svg` —
-            BUKAN `Logo.svg`, yang logo lama dan tidak berlaku lagi. `aria-hidden` karena kata
+        {/* Koin 20 px mendahului angkanya (Figma `asset/usdx-coin · 20`). `logo-coin.png` disalin
+            persis dari landing (usdx.co.id) — satu sumber logo. `aria-hidden` karena kata
             "USDX" sudah tertulis persis di sebelahnya; membacakannya dua kali cuma bising. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/image/usdx-coin.svg" alt="" aria-hidden className="size-5 shrink-0" />
+        <img src="/image/logo-coin.png" alt="" aria-hidden className="size-5 shrink-0" />
         <span className="font-semibold">{formatTokenAmount(order.amount)} USDX</span>
       </Row>
       <Row label={CHECKOUT_COPY.walletLabel}>
