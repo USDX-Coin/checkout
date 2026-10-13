@@ -1,27 +1,78 @@
 import { describe, test, expect, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { PaymentMethodSelector } from "@/components/checkout/PaymentMethodSelector";
+import {
+  PaymentMethodSelector,
+  cheapestChannel,
+  priceOf,
+} from "@/components/checkout/PaymentMethodSelector";
 import type { MintChannelOption } from "@/types";
 
-// Temuan audit D4: layar pertama checkout hanya menampilkan "Nilai pesanan" dan biaya layanan
-// per metode — angka yang benar-benar harus dibayar baru muncul SETELAH kartu metode diklik.
-// Di halaman pembayaran, itu terlambat.
-//
-// Temuan audit D5: satu angka, satu nama. "Total bayar" dipakai di sini, di ringkasan, di
-// rincian biaya, dan di blok instruksi VA.
+// Pemilih metode D25 (USDX-764). Kontrak: `sot/api/mint.yaml` ChannelOption / ChannelBankOption
+// (rev-16/17), pola UX `sot/phase-2/week2.md` § Checkout, aturan `sot/bni-integration.md` §4.3.
+// Semua kartu dari `channels[]` — tidak ada kartu statis, tidak ada urutan yang dipatok FE.
 
-const VA: MintChannelOption = { channel: "VA", pgFeeIdr: "4000", banks: ["BCA", "BNI"] };
-const QRIS: MintChannelOption = { channel: "QRIS", pgFeeIdr: "4000", banks: null };
-const QRIS_MAHAL: MintChannelOption = { channel: "QRIS", pgFeeIdr: "5500", banks: null };
+// ── Fixture sesuai kontrak D25 ───────────────────────────────────────────────────────────────
+const BNI: MintChannelOption = {
+  channel: "BANK_TRANSFER",
+  rateAdjustmentPct: null,
+  effectiveRate: "16200.00",
+  rateUpdatedAt: "2026-10-13T02:00:00Z",
+  subtotalIdr: "81000.00",
+  mintFeeIdr: "810.00",
+  pgFeeIdr: "0.00",
+  estimatedTotalPayIdr: "81810.00",
+  estimatedTotalPayMaxIdr: "82809.00",
+  available: true,
+  unavailableReason: null,
+  maxAmountIdr: "10000000.00",
+  banks: ["BNI"],
+  bankOptions: [
+    {
+      paymentMethodId: "019e5c10-0000-7000-8000-000000000001",
+      bank: "BNI",
+      feeType: "FLAT_IDR",
+      feeValue: "0.00",
+      pgFeeIdr: "0.00",
+      estimatedTotalPayIdr: "81810.00",
+      estimatedTotalPayMaxIdr: "82809.00",
+      available: true,
+      unavailableReason: null,
+      maxAmountIdr: "10000000.00",
+    },
+  ],
+};
+
+const VA: MintChannelOption = {
+  channel: "VA",
+  rateAdjustmentPct: "2.5",
+  effectiveRate: "16400.00",
+  rateUpdatedAt: null,
+  subtotalIdr: "82000.00",
+  mintFeeIdr: "820.00",
+  pgFeeIdr: "4000.00",
+  estimatedTotalPayIdr: "86820.00",
+  estimatedTotalPayMaxIdr: "86820.00",
+  available: true,
+  unavailableReason: null,
+  maxAmountIdr: null,
+  banks: ["NOBU"],
+  bankOptions: [
+    {
+      paymentMethodId: "019e5c10-0000-7000-8000-000000000000",
+      bank: "NOBU",
+      feeType: "FLAT_IDR",
+      feeValue: "4000.00",
+      pgFeeIdr: "4000.00",
+      estimatedTotalPayIdr: "86820.00",
+      estimatedTotalPayMaxIdr: "86820.00",
+      available: true,
+    },
+  ],
+  disabledBanks: ["BNI", "MANDIRI", "BRI"],
+};
 
 function renderSelector(channels: MintChannelOption[], onPay = vi.fn()) {
-  const props = {
-    totalBeforePgFeeIdr: "162500",
-    isPaying: false,
-    payError: null,
-    onPay,
-    onCancel: vi.fn(),
-  };
+  const props = { isPaying: false, payError: null, onPay, onCancel: vi.fn(), mintFeePct: "1" };
   const view = render(<PaymentMethodSelector channels={channels} {...props} />);
   return {
     ...view,
@@ -32,404 +83,332 @@ function renderSelector(channels: MintChannelOption[], onPay = vi.fn()) {
   };
 }
 
-describe("total bayar terbaca sejak awal (D4)", () => {
-  // Regresi 5 Sep 2026. `hasBreakdown` dulu menuntut `n > 0` untuk SETIAP angka,
-  // jadi backend yang mengirim `mintFeeIdr: "0.00"` (mint gratis — nilai yang sah)
-  // menghapus SELURUH tabel rincian: kurs terkunci beserta hitung mundurnya, nilai
-  // USDX, biaya, total. Yang tersisa di layar tempat orang memutuskan membayar cuma
-  // satu angka tanpa penjelasan.
-  test("biaya mint nol tidak menghapus tabel rincian", () => {
-    render(
-      <PaymentMethodSelector
-        channels={[VA]}
-        totalBeforePgFeeIdr="162500"
-        subtotalIdr="162500.00"
-        mintFeeIdr="0.00"
-        effectiveRate="16250.0000"
-        isPaying={false}
-        payError={null}
-        onPay={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/Kurs terkunci/i)).toBeInTheDocument();
-    expect(screen.getByText(/Nilai USDX/i)).toBeInTheDocument();
+const card = (name: RegExp) => screen.getByRole("radio", { name });
+const payButton = () => screen.getByRole("button", { name: /Bayar|Pilih metode/ });
+
+describe("daftar metode datang dari backend (rev-16)", () => {
+  describe("positive", () => {
+    test("Transfer BNI dan Virtual Account dirender dari channels[] dengan satu angka total", () => {
+      renderSelector([BNI, VA]);
+      expect(card(/Transfer BNI/)).toBeInTheDocument();
+      expect(card(/Virtual Account/)).toBeInTheDocument();
+      expect(screen.getByText("Rp 81.810")).toBeInTheDocument();
+      expect(screen.getByText("Rp 86.820")).toBeInTheDocument();
+    });
+
+    test("urutan kartu = urutan backend (sortOrder admin), bukan urutan yang dipatok FE", () => {
+      renderSelector([VA, BNI]);
+      const names = screen.getAllByRole("radio").map((r) => r.getAttribute("value"));
+      expect(names).toEqual(["VA", "BANK_TRANSFER"]);
+    });
+
+    test("urutan bank = urutan backend", () => {
+      renderSelector([{ ...VA, banks: ["BRI", "NOBU", "MANDIRI"], bankOptions: undefined, disabledBanks: undefined }]);
+      fireEvent.click(card(/Virtual Account/));
+      const group = screen.getByRole("radiogroup", { name: "Pilih bank" });
+      const banks = within(group).getAllByRole("radio").map((r) => r.getAttribute("value"));
+      expect(banks).toEqual(["BRI", "NOBU", "MANDIRI"]);
+    });
   });
 
-  describe("positive", () => {
-    test("satu metode → total pasti tampil sebelum apa pun diklik", () => {
+  describe("negative", () => {
+    test("tanpa BANK_TRANSFER di channels[], TIDAK ada kartu Transfer BNI sama sekali", () => {
       renderSelector([VA]);
-      expect(screen.getByText("Total bayar")).toBeInTheDocument();
-      expect(screen.getByText("Rp 166.500")).toBeInTheDocument();
+      expect(screen.queryByText(/Transfer BNI|Transfer bank BNI/)).not.toBeInTheDocument();
+      expect(screen.getAllByRole("radio")).toHaveLength(1);
     });
 
-    test("beberapa metode berbiaya sama → tetap satu angka pasti", () => {
-      renderSelector([VA, QRIS]);
-      expect(screen.getByText("Rp 166.500")).toBeInTheDocument();
-      expect(screen.queryByText(/mengikuti metode/)).not.toBeInTheDocument();
-    });
-
-    test("setelah metode dipilih, totalnya jadi angka metode itu", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      fireEvent.click(screen.getByText("QRIS"));
-      expect(screen.getByText("Rp 168.000")).toBeInTheDocument();
+    test("channel yang tak dikenal (enum terbuka) tidak dirender sebagai pilihan", () => {
+      renderSelector([VA, { ...VA, channel: "EWALLET" as never }]);
+      expect(screen.getAllByRole("radio")).toHaveLength(1);
     });
   });
 
   describe("edge cases", () => {
-    test("biaya antar-metode BERBEDA → rentang + catatan, bukan satu angka yang dikarang", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      expect(screen.getByText("Rp 166.500 – Rp 168.000")).toBeInTheDocument();
-      expect(screen.getByText(/mengikuti metode/)).toBeInTheDocument();
+    test("backend lama tanpa estimasi per metode → total = harga order + biaya layanan", () => {
+      render(
+        <PaymentMethodSelector
+          channels={[{ channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"] }]}
+          totalBeforePgFeeIdr="162500"
+          subtotalIdr="162500.00"
+          mintFeeIdr="0.00"
+          effectiveRate="16250.0000"
+          isPaying={false}
+          payError={null}
+          onPay={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("Rp 166.500")).toBeInTheDocument();
     });
 
-    test("biaya tak diketahui (refresh tanpa channels lengkap) → tak ada angka yang dikarang", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "", banks: ["BCA"] }]);
-      expect(screen.queryByText("Total bayar")).not.toBeInTheDocument();
+    test("biaya mint nol tetap menampilkan rincian (nol itu sah, bukan data hilang)", () => {
+      renderSelector([{ ...VA, mintFeeIdr: "0.00" }]);
+      fireEvent.click(card(/Virtual Account/));
+      expect(screen.getByText(/Nilai USDX/)).toBeInTheDocument();
+      expect(screen.getByText("Rp 0")).toBeInTheDocument();
     });
   });
 });
 
-describe("penamaan angka (D5)", () => {
-  describe("negative", () => {
-    test("tidak memakai label lama yang berbeda-beda untuk angka yang sama", () => {
-      renderSelector([VA]);
-      expect(screen.queryByText("Total yang dibayar")).not.toBeInTheDocument();
-      expect(screen.queryByText("Jumlah yang harus dibayar")).not.toBeInTheDocument();
-    });
-  });
-});
-
-
-// ── Migrasi ke `ui/radio-group` (temuan F5/F6/D4, peta migrasi D.1) ──────────────────────────
-// Dulu metode dan bank dirender sebagai <button aria-pressed>. `aria-pressed` menyatakan TOGGLE
-// yang bisa menyala sendiri-sendiri; ini pilihan eksklusif. Radix memberi peran, keterkaitan
-// grup, navigasi panah, dan satu tab stop — semuanya hilang di versi buatan tangan.
-describe("pilihan memakai semantik radio, bukan tombol toggle", () => {
+describe("penanda 'Paling hemat' (rev-17 R8)", () => {
   describe("positive", () => {
-    test("metode dirender sebagai satu grup radio bernama", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      expect(screen.getByRole("radiogroup", { name: "Metode pembayaran" })).toBeInTheDocument();
-      // Dua channel dari backend + kartu "Transfer bank BNI" yang selalu ada (Figma A1a).
-      expect(screen.getAllByRole("radio")).toHaveLength(3);
+    test("menempel di estimatedTotalPayMaxIdr terkecil", () => {
+      renderSelector([BNI, VA]);
+      expect(within(card(/Transfer BNI/).closest("label")!).getByText("Paling hemat")).toBeInTheDocument();
+      expect(screen.getAllByText("Paling hemat")).toHaveLength(1);
     });
 
-    test("memilih metode menandai tepat satu radio terpilih", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      fireEvent.click(screen.getByRole("radio", { name: /QRIS/ }));
-      expect(screen.getByRole("radio", { name: /QRIS/ })).toBeChecked();
-      expect(screen.getByRole("radio", { name: /Virtual Account/ })).not.toBeChecked();
-    });
-
-    test("bank jadi grup radio TERPISAH (dua RovingFocusGroup bersarang berebut tombol panah)", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      const grup = screen.getAllByRole("radiogroup");
-      expect(grup).toHaveLength(2);
-      expect(screen.getByRole("radiogroup", { name: "Pilih bank" })).toBeInTheDocument();
-      // Grup bank bukan keturunan grup metode.
-      const metode = screen.getByRole("radiogroup", { name: "Metode pembayaran" });
-      expect(metode.contains(screen.getByRole("radiogroup", { name: "Pilih bank" }))).toBe(false);
-    });
-
-    test("tiap bank punya nama yang terbaca, bukan cuma gambar", () => {
-      renderSelector([VA]);
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      expect(screen.getByRole("radio", { name: "BCA" })).toBeInTheDocument();
-      expect(screen.getByRole("radio", { name: "BNI" })).toBeInTheDocument();
+    test("bisa jatuh ke Virtual Account — tidak ada penanda tetap untuk BNI", () => {
+      const mahal = { ...BNI, estimatedTotalPayIdr: "86500.00", estimatedTotalPayMaxIdr: "87499.00" };
+      expect(cheapestChannel([mahal, VA])).toBe("VA");
     });
   });
 
   describe("negative", () => {
-    test("tidak ada lagi aria-pressed (itu semantik toggle, bukan pilihan eksklusif)", () => {
-      const { container } = renderSelector([VA, QRIS_MAHAL]);
-      expect(container.querySelector("[aria-pressed]")).toBeNull();
+    test("dinilai TERMASUK kode unik: BNI lebih murah tanpa kode, tapi +999 lebih mahal → VA", () => {
+      // 86.000 < 86.820 tanpa kode unik, tapi 86.999 > 86.820 dengan batas atasnya.
+      const bni = { ...BNI, estimatedTotalPayIdr: "86000.00", estimatedTotalPayMaxIdr: "86999.00" };
+      expect(cheapestChannel([bni, VA])).toBe("VA");
+    });
+
+    test("opsi available=false tidak pernah diberi penanda", () => {
+      const bni = { ...BNI, available: false, unavailableReason: "AMOUNT_ABOVE_METHOD_MAX" };
+      expect(cheapestChannel([bni, VA])).toBeNull();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("seri → tidak ada penanda", () => {
+      expect(cheapestChannel([{ ...BNI, estimatedTotalPayMaxIdr: "86820.00" }, VA])).toBeNull();
+    });
+
+    test("backend tanpa estimatedTotalPayMaxIdr → tidak ada penanda (tak bisa dinilai jujur)", () => {
+      expect(
+        cheapestChannel([{ ...BNI, estimatedTotalPayMaxIdr: undefined }, VA]),
+      ).toBeNull();
+    });
+
+    test("satu metode → tak ada pembanding", () => {
+      expect(cheapestChannel([VA])).toBeNull();
     });
   });
 });
 
-// Aturan F6 lama ("metode/bank tunggal dipilih dari awal") DICABUT, keputusan pemilik produk
-// 5 September 2026. Premisnya — "cuma ada satu pilihan, jadi mengkliknya sia-sia" — sudah tidak
-// berlaku sejak kartu "Transfer bank BNI" digambar permanen: layar ini selalu punya lebih dari
-// satu kartu. Akibat aturan itu nyata: dengan satu channel dari backend, layar terbuka dengan
-// Virtual Account sudah tercentang, jadi keadaan A1a Figma (`2639:31770`, "belum dipilih, tidak
-// dipra-pilih") tidak pernah terlihat sama sekali.
-describe("tidak ada yang dipra-pilih (Figma A1a)", () => {
-  describe("positive", () => {
-    test("satu metode dari backend → tetap belum ada yang tercentang", () => {
-      renderSelector([VA]);
-      expect(screen.getByRole("radio", { name: /Virtual Account/ })).not.toBeChecked();
-      expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0);
-      expect(screen.getByText(/Pilih metode pembayaran untuk lanjut/)).toBeInTheDocument();
-    });
+describe("opsi yang tidak tersedia untuk order ini (rev-17)", () => {
+  const BNI_DI_ATAS_BATAS: MintChannelOption = {
+    ...BNI,
+    estimatedTotalPayIdr: "10000500.00",
+    estimatedTotalPayMaxIdr: "10001499.00",
+    available: false,
+    unavailableReason: "AMOUNT_ABOVE_METHOD_MAX",
+  };
 
-    test("satu metode + satu bank → bayar tetap mati sampai keduanya diketuk", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BNI"] }]);
-      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      expect(screen.getByRole("radio", { name: "BNI" })).not.toBeChecked();
-      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
-      fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
-      expect(screen.getByText("Bayar sekarang").closest("button")).not.toBeDisabled();
+  describe("positive", () => {
+    test("tampil non-aktif beserta alasannya, bukan disembunyikan", () => {
+      renderSelector([BNI_DI_ATAS_BATAS, VA]);
+      expect(card(/Transfer BNI/)).toBeDisabled();
+      expect(screen.getByText(/melebihi batas Rp 10\.000\.000/)).toBeInTheDocument();
     });
   });
 
   describe("negative", () => {
-    test("lebih dari satu metode → tak ada yang dipilih diam-diam", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0);
-      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
+    test("tidak bisa dipilih dan tidak bisa dibayar", () => {
+      const { onPay } = renderSelector([BNI_DI_ATAS_BATAS, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      expect(card(/Transfer BNI/)).not.toBeChecked();
+      expect(payButton()).toBeDisabled();
+      expect(onPay).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("alasan yang tak dikenal → teks umum, tetap non-aktif", () => {
+      renderSelector([{ ...BNI, available: false, unavailableReason: "ALASAN_BARU" }, VA]);
+      expect(card(/Transfer BNI/)).toBeDisabled();
+      expect(screen.getByText(/tidak bisa dipakai untuk pesanan ini/)).toBeInTheDocument();
     });
 
-    test("lapis bank belum muncul sebelum metode dipilih", () => {
-      renderSelector([VA]);
+    test("metode terpilih berubah tidak tersedia di muatan berikutnya → tombol bayar mati lagi", () => {
+      const { repoll } = renderSelector([BNI, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      expect(payButton()).toBeEnabled();
+      repoll([BNI_DI_ATAS_BATAS, VA]);
+      expect(payButton()).toBeDisabled();
+    });
+
+    test("semua opsi tidak tersedia → kalimat yang menjelaskan, bukan perintah memilih", () => {
+      renderSelector([BNI_DI_ATAS_BATAS]);
+      expect(screen.getByText(/Belum ada metode pembayaran yang bisa dipakai/)).toBeInTheDocument();
+    });
+  });
+});
+
+describe("Transfer BNI dipilih", () => {
+  describe("positive", () => {
+    test("detail: kurs BNI sesuai aplikasi wondr + catatan kode unik maks Rp 999", () => {
+      renderSelector([BNI, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      const detail = screen.getByTestId("detail-BANK_TRANSFER");
+      expect(within(detail).getByText("Kurs BNI Rp 16.200, sesuai aplikasi wondr")).toBeInTheDocument();
+      expect(within(detail).getByText(/Diperbarui 13 Okt 2026/)).toBeInTheDocument();
+      expect(within(detail).getByText(/kode unik \(maks\. Rp 999\)/)).toBeInTheDocument();
+    });
+
+    test("tombol menyebut angkanya dan mengirim channel=BANK_TRANSFER, bank=BNI", () => {
+      const { onPay } = renderSelector([BNI, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      expect(payButton()).toHaveTextContent("Bayar Rp 81.810");
+      fireEvent.click(payButton());
+      expect(onPay).toHaveBeenCalledWith("BANK_TRANSFER", "BNI");
+    });
+  });
+
+  describe("negative", () => {
+    test("tidak meminta pilih bank", () => {
+      renderSelector([BNI, VA]);
+      fireEvent.click(card(/Transfer BNI/));
       expect(screen.queryByRole("radiogroup", { name: "Pilih bank" })).not.toBeInTheDocument();
     });
-
-    test("satu metode tapi banyak bank → bayar tetap terkunci sampai bank dipilih", () => {
-      renderSelector([VA]);
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
-      expect(screen.getByText(/Pilih bank dulu untuk lanjut/)).toBeInTheDocument();
-    });
   });
 
   describe("edge cases", () => {
-    test("pindah metode melepas bank yang tadi dipilih", () => {
-      renderSelector([VA, QRIS_MAHAL]);
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
-      fireEvent.click(screen.getByRole("radio", { name: /QRIS/ }));
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      expect(screen.getByRole("radio", { name: "BNI" })).not.toBeChecked();
+    test("kurs berdesimal tidak dibulatkan ke rupiah", () => {
+      renderSelector([{ ...BNI, effectiveRate: "16412.50" }, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      expect(screen.getByText("Kurs BNI Rp 16.412,50, sesuai aplikasi wondr")).toBeInTheDocument();
     });
   });
 });
 
-// Kartu kedua Figma A1a/A1b (`2639:31820`). TIDAK datang dari `channels[]` — transfer bank
-// langsung belum ada di backend, dan justru itu yang diberitahukan kartunya.
-describe("kartu 'Transfer bank BNI' segera hadir", () => {
+describe("Virtual Account dipilih", () => {
   describe("positive", () => {
-    test("selalu dirender, bahkan saat backend cuma mengirim satu channel", () => {
-      renderSelector([VA]);
-      expect(screen.getByRole("radio", { name: /Transfer bank BNI/ })).toBeInTheDocument();
-      expect(screen.getByText("Segera hadir")).toBeInTheDocument();
+    test("pilih bank lalu bayar mengirim channel=VA + bank", () => {
+      const { onPay } = renderSelector([BNI, VA]);
+      fireEvent.click(card(/Virtual Account/));
+      fireEvent.click(screen.getByRole("radio", { name: "Nobu" }));
+      fireEvent.click(payButton());
+      expect(onPay).toHaveBeenCalledWith("VA", "NOBU");
     });
 
-    test("pembaca layar tahu ia belum tersedia: badge ikut jadi namanya", () => {
-      renderSelector([VA]);
-      expect(
-        screen.getByRole("radio", { name: /Transfer bank BNI.*Segera hadir/ }),
-      ).toBeInTheDocument();
+    test("biaya per bank dari bankOptions[] — total tombol ikut bank yang dipilih", () => {
+      const va: MintChannelOption = {
+        ...VA,
+        banks: ["NOBU", "MANDIRI"],
+        disabledBanks: undefined,
+        bankOptions: [
+          { ...VA.bankOptions![0] },
+          {
+            paymentMethodId: "m2",
+            bank: "MANDIRI",
+            feeType: "FLAT_IDR",
+            feeValue: "5000.00",
+            pgFeeIdr: "5000.00",
+            estimatedTotalPayIdr: "87820.00",
+            estimatedTotalPayMaxIdr: "87820.00",
+          },
+        ],
+      };
+      renderSelector([va]);
+      // Sebelum bank dipilih, angka channel = bank termurah dan diberi awalan "mulai".
+      expect(screen.getByText("mulai Rp 86.820")).toBeInTheDocument();
+      fireEvent.click(card(/Virtual Account/));
+      fireEvent.click(screen.getByRole("radio", { name: "Mandiri" }));
+      expect(payButton()).toHaveTextContent("Bayar Rp 87.820");
+    });
+
+    test("bank di disabledBanks tampil 'Segera hadir', bukan pilihan", () => {
+      renderSelector([BNI, VA]);
+      fireEvent.click(card(/Virtual Account/));
+      const list = screen.getByRole("list", { name: "Bank yang belum tersedia" });
+      expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+      const group = screen.getByRole("radiogroup", { name: "Pilih bank" });
+      expect(within(group).getAllByRole("radio")).toHaveLength(1);
     });
   });
 
   describe("negative", () => {
-    test("benar-benar mati: disabled, lepas dari roving focus, tak bisa dicentang", () => {
-      renderSelector([VA]);
-      const kartu = screen.getByRole("radio", { name: /Transfer bank BNI/ });
-      expect(kartu).toBeDisabled();
-      expect(kartu).toHaveAttribute("data-disabled");
-      expect(kartu).toHaveAttribute("tabindex", "-1");
-      fireEvent.click(kartu);
-      expect(kartu).not.toBeChecked();
-      expect(screen.getByText("Bayar sekarang").closest("button")).toBeDisabled();
+    test("tanpa bank dipilih, tombol bayar mati", () => {
+      renderSelector([BNI, VA]);
+      fireEvent.click(card(/Virtual Account/));
+      expect(payButton()).toBeDisabled();
+      expect(screen.getByText("Pilih bank dulu untuk lanjut.")).toBeInTheDocument();
     });
 
-    test("tidak ikut menghitung biaya — ia bukan channel", () => {
-      renderSelector([VA]);
-      // Total tetap dari VA saja: 162.500 + 4.000.
-      expect(screen.getByText("Rp 166.500")).toBeInTheDocument();
-    });
-  });
-});
-
-// Figma A1b (`2639:32217`) menggambar Mandiri → BRI → BNI. Backend tidak menjanjikan urutan,
-// dan halaman ini mem-poll GET terus-menerus: urutan yang ikut respons berarti ubin bank bisa
-// bertukar tempat di bawah jari orang yang sedang memilih rekening tujuan.
-describe("urutan bank ditentukan di sini, bukan oleh urutan respons", () => {
-  describe("positive", () => {
-    test("ubin bank urut Mandiri → BRI → BNI apa pun urutan backend", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BNI", "MANDIRI", "BRI"] }]);
-      fireEvent.click(screen.getByRole("radio", { name: /Virtual Account/ }));
-      const grup = screen.getByRole("radiogroup", { name: "Pilih bank" });
-      const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
-        el.getAttribute("aria-label"),
-      );
-      // Nama yang dibacakan = nama yang tertulis ("Mandiri", bukan enum "MANDIRI"), sama dengan
-      // keterangan kartu dan daftar bank yang belum aktif. Satu bank, satu sebutan di satu layar.
-      expect(nama).toEqual(["Mandiri", "BRI", "BNI"]);
+    test("bank yang pindah ke disabledBanks setelah dipilih tidak ikut terkirim", () => {
+      const { onPay, repoll } = renderSelector([BNI, VA]);
+      fireEvent.click(card(/Virtual Account/));
+      fireEvent.click(screen.getByRole("radio", { name: "Nobu" }));
+      repoll([BNI, { ...VA, disabledBanks: ["NOBU", "BNI"] }]);
+      fireEvent.click(payButton());
+      expect(onPay).not.toHaveBeenCalled();
     });
 
-    test("keterangan kartu VA memakai nama yang dibaca orang, urut sama", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BNI", "MANDIRI", "BRI"] }]);
-      expect(screen.getByText("Mandiri · BRI · BNI")).toBeInTheDocument();
+    test("bank dengan bankOptions available=false tidak bisa dipilih", () => {
+      renderSelector([
+        {
+          ...VA,
+          disabledBanks: undefined,
+          bankOptions: [{ ...VA.bankOptions![0], available: false, unavailableReason: "AMOUNT_ABOVE_METHOD_MAX", maxAmountIdr: "50000.00" }],
+        },
+      ]);
+      fireEvent.click(card(/Virtual Account/));
+      expect(screen.queryByRole("radiogroup", { name: "Pilih bank" })).not.toBeInTheDocument();
+      expect(screen.getByText(/melebihi batas Rp 50\.000/)).toBeInTheDocument();
     });
   });
 
   describe("edge cases", () => {
-    test("bank di luar daftar urutan tetap tampil, di belakang", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["BCA", "BNI", "MANDIRI"] }]);
-      expect(screen.getByText("Mandiri · BNI · BCA")).toBeInTheDocument();
+    test("tanpa satu pun bank aktif → tidak ada perintah yang mustahil dituruti", () => {
+      renderSelector([{ ...VA, banks: [], bankOptions: [] }]);
+      fireEvent.click(card(/Virtual Account/));
+      expect(screen.queryByText("Pilih bank dulu untuk lanjut.")).not.toBeInTheDocument();
+      expect(screen.getByText(/Belum ada bank yang bisa dipakai/)).toBeInTheDocument();
     });
   });
 });
 
-
-// USDX-622 — bank yang belum diaktifkan penyedia tetap tampil, tapi tidak bisa dipilih.
-//
-// Menyembunyikan dan menawarkan sama-sama merugikan: disembunyikan, pemegang rekening BNI/Mandiri/
-// BRI mengira banknya tidak dilayani dan pergi; ditawarkan hidup, ia gagal tepat setelah menekan
-// bayar. Yang dijaga tes ini: keduanya terlihat, hanya satu yang bisa diklik.
-describe("bank yang belum aktif (USDX-622)", () => {
-  const VA_NOBU: MintChannelOption = {
-    channel: "VA",
-    pgFeeIdr: "4000",
-    banks: ["NOBU"],
-    disabledBanks: ["BNI", "MANDIRI", "BRI"],
-  };
-
+describe("tidak ada yang dipra-pilih (Figma A1a)", () => {
   describe("positive", () => {
-    test("ketiganya tampil dengan nama bank dan label Segera hadir", () => {
-      renderSelector([VA_NOBU]);
-      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
-
-      const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
-      for (const nama of ["BNI", "Mandiri", "BRI"]) {
-        expect(within(daftar).getByText(nama)).toBeInTheDocument();
-      }
-      expect(within(daftar).getAllByText("Segera hadir")).toHaveLength(3);
-    });
-
-    test("bank yang aktif tetap bisa dipilih", () => {
-      renderSelector([VA_NOBU]);
-      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
-
-      const nobu = screen.getByRole("radio", { name: "Nobu" });
-      fireEvent.click(nobu);
-      expect(nobu).toBeChecked();
+    test("tombol utama mati dan menyebut alasannya sebelum memilih", () => {
+      renderSelector([BNI, VA]);
+      expect(payButton()).toBeDisabled();
+      expect(payButton()).toHaveTextContent("Pilih metode pembayaran");
     });
   });
 
   describe("negative", () => {
-    test("bank yang belum aktif tidak jadi pilihan radio sama sekali", () => {
-      renderSelector([VA_NOBU]);
-      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
-
-      const grup = screen.getByRole("radiogroup", { name: "Pilih bank" });
-      const nama = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
-        el.getAttribute("aria-label"),
-      );
-      expect(nama).toEqual(["Nobu"]);
-    });
-
-    test("keterangan kartu hanya menyebut bank yang benar-benar bisa dipakai", () => {
-      renderSelector([VA_NOBU]);
-      expect(screen.getByText("Nobu")).toBeInTheDocument();
-      expect(screen.queryByText(/Nobu · BNI/)).not.toBeInTheDocument();
+    test("satu metode dari backend → tetap belum tercentang", () => {
+      renderSelector([BNI]);
+      expect(card(/Transfer BNI/)).not.toBeChecked();
     });
   });
 
   describe("edge cases", () => {
-    // Dicari lewat nama daftarnya, bukan lewat teks "Segera hadir": layar ini sudah punya kartu
-    // "Transfer bank BNI" dengan badge yang sama, jadi mencari teksnya di seluruh dokumen akan
-    // selalu ketemu dan tidak membuktikan apa pun.
-    test("tanpa disabledBanks, daftar bank yang belum aktif tidak dirender", () => {
-      renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"] }]);
-      fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
-      expect(
-        screen.queryByRole("list", { name: "Bank yang belum tersedia" }),
-      ).not.toBeInTheDocument();
+    test("ganti metode mereset bank", () => {
+      const { onPay } = renderSelector([BNI, VA]);
+      fireEvent.click(card(/Virtual Account/));
+      fireEvent.click(screen.getByRole("radio", { name: "Nobu" }));
+      fireEvent.click(card(/Transfer BNI/));
+      fireEvent.click(card(/Virtual Account/));
+      expect(payButton()).toBeDisabled();
+      expect(onPay).not.toHaveBeenCalled();
     });
   });
 });
 
-// Tiga kelas kegagalan yang ditemukan verifikasi netral PR #30. Semuanya lolos CI hijau, jadi
-// tesnya ditulis di sini supaya tidak bisa kembali diam-diam.
-describe("bank yang belum aktif · jalur yang sempat bocor (USDX-622)", () => {
-  const NOBU_ONLY: MintChannelOption = {
-    channel: "VA",
-    pgFeeIdr: "4000",
-    banks: ["NOBU", "BNI"],
-    disabledBanks: [],
-  };
-  const BNI_DIMATIKAN: MintChannelOption = {
-    channel: "VA",
-    pgFeeIdr: "4000",
-    banks: ["NOBU"],
-    disabledBanks: ["BNI"],
-  };
-
-  function pilihVa() {
-    fireEvent.click(screen.getByRole("radio", { name: /virtual account/i }));
-  }
-
-  // Halaman ini memuat ulang `channels[]`: bank yang tadi hidup bisa berpindah ke `disabledBanks`
-  // SESUDAH orang memilihnya. Ubinnya lenyap dari layar, tapi state-nya tidak ikut lenyap.
-  test("bank yang dimatikan setelah dipilih tidak ikut terkirim ke onPay", () => {
-    const { onPay, repoll } = renderSelector([NOBU_ONLY]);
-    pilihVa();
-    fireEvent.click(screen.getByRole("radio", { name: "BNI" }));
-
-    repoll([BNI_DIMATIKAN]);
-
-    const bayar = screen.getByRole("button", { name: /bayar sekarang/i });
-    expect(bayar).toBeDisabled();
-    fireEvent.click(bayar);
-    expect(onPay).not.toHaveBeenCalled();
+describe("priceOf", () => {
+  test("positive — bank terpilih memakai angka bankOptions-nya", () => {
+    const p = priceOf(VA, {}, { ...VA.bankOptions![0], pgFeeIdr: "5000.00", estimatedTotalPayIdr: "87820.00" });
+    expect(p.total).toBe(87820);
+    expect(p.pgFee).toBe(5000);
   });
 
-  // Satu bank, dua nasib di layar yang sama. Yang menang harus yang mati: menolak sesuatu yang
-  // mestinya boleh cuma merepotkan, menerima sesuatu yang mestinya ditolak memakan uang orang.
-  test("bank yang muncul di kedua daftar tidak bisa dipilih", () => {
-    renderSelector([
-      { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU", "BNI"], disabledBanks: ["BNI"] },
-    ]);
-    pilihVa();
-
-    expect(screen.queryByRole("radio", { name: "BNI" })).not.toBeInTheDocument();
-    const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
-    expect(within(daftar).getByText("BNI")).toBeInTheDocument();
+  test("negative — tanpa estimasi dan tanpa harga order → total null, bukan Rp 0", () => {
+    expect(priceOf({ channel: "VA", pgFeeIdr: "4000", banks: [] }, { totalBeforePgFeeIdr: null }).total).toBeNull();
   });
 
-  // Terjangkau begitu penyedia mematikan Nobu juga — persis mekanisme yang tiket ini bangun.
-  test("tanpa satu pun bank aktif, tidak ada perintah yang mustahil dituruti", () => {
-    renderSelector([{ channel: "VA", pgFeeIdr: "4000", banks: [], disabledBanks: ["BNI", "NOBU"] }]);
-    pilihVa();
-
-    expect(screen.queryByRole("radiogroup", { name: "Pilih bank" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Pilih bank dulu untuk lanjut.")).not.toBeInTheDocument();
-    expect(screen.getByText(/Belum ada bank yang bisa dipakai/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /bayar sekarang/i })).toBeDisabled();
-  });
-
-  // Keputusan utama tiket ini: NOBU dibaca lebih dulu karena satu-satunya yang bisa diklik.
-  // Sebelumnya tidak ada satu pun tes yang merah kalau urutannya dicabut.
-  test("NOBU dibacakan paling depan di antara bank yang aktif", () => {
-    renderSelector([
-      { channel: "VA", pgFeeIdr: "4000", banks: ["BNI", "MANDIRI", "NOBU", "BRI"] },
-    ]);
-    pilihVa();
-
-    const grup = screen.getByRole("radiogroup", { name: "Pilih bank" });
-    const urutan = Array.from(grup.querySelectorAll("[data-slot=radio-group-item]")).map((el) =>
-      el.getAttribute("value"),
-    );
-    expect(urutan[0]).toBe("NOBU");
-  });
-
-  // Daftar mati ikut diurutkan karena alasan yang sama dengan daftar hidup: halaman ini memuat
-  // ulang, dan urutan respons yang bergeser menukar ubin di bawah jari orang.
-  test("daftar bank mati ikut urutan yang dipatok, bukan urutan respons", () => {
-    renderSelector([
-      { channel: "VA", pgFeeIdr: "4000", banks: ["NOBU"], disabledBanks: ["BNI", "BRI", "MANDIRI"] },
-    ]);
-    pilihVa();
-
-    const daftar = screen.getByRole("list", { name: "Bank yang belum tersedia" });
-    const urutan = Array.from(daftar.querySelectorAll("li")).map(
-      (li) => li.textContent?.replace("Segera hadir", "") ?? "",
-    );
-    expect(urutan).toEqual(["Mandiri", "BRI", "BNI"]);
+  test("edge — string kosong tidak dibaca sebagai nol", () => {
+    expect(priceOf({ channel: "VA", pgFeeIdr: "", banks: [] }, { totalBeforePgFeeIdr: "1000" }).total).toBeNull();
   });
 });

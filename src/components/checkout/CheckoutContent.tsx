@@ -37,6 +37,7 @@ import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { CopyField } from "@/components/ui/copy-field";
 import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
+import { uniqueCodeAmount } from "@/lib/checkout/unique-code";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LinkInline } from "@/components/ui/link-inline";
@@ -63,8 +64,12 @@ function txExplorerUrl(chain: string, hash: string): string | null {
 // Metode bayar HANYA dari backend — ia yang tahu adapter aktif menerima apa. Dulu ada fallback
 // daftar statis 9 bank + QRIS di sini; di bawah DurianPay SNAP (VA BNI/MANDIRI/BRI saja) itu
 // menawarkan 7 pilihan yang pasti ditolak. Daftar kosong → suruh muat ulang, jangan menebak.
+//
+// D25/rev-16: daftar, urutan, dan biayanya diatur admin dari back-office — urutan backend dipakai
+// apa adanya. Channel yang tak dikenal FE (enum terbuka) tidak dihitung sebagai pilihan.
+const KNOWN_CHANNELS = new Set(["VA", "QRIS", "BANK_TRANSFER"]);
 function resolveChannels(order: MintOrderDetail): MintChannelOption[] {
-  return order.channels ?? [];
+  return (order.channels ?? []).filter((c) => KNOWN_CHANNELS.has(c.channel));
 }
 
 // Tepi kartu digambar sebagai bayangan INSET, bukan `border`. Figma menaruh stroke di DALAM
@@ -301,6 +306,128 @@ function QrisInstruction({
 }
 
 /**
+ * Instruksi Transfer BNI (D25 — `sot/phase-2/week2.md` § Checkout, `sot/bni-integration.md` §4.2
+ * langkah 3 + §4.3.12 R6; tata letak desain PM 2 Okt 2026).
+ *
+ * Tiga hal untuk mentransfer, di urutan ini: NOMINAL (`totalPayIdr`, sudah termasuk kode unik —
+ * besar, bisa disalin), REKENING tujuan (`virtualAccountNo` = rekening penampung, bisa disalin),
+ * dan SISA WAKTU (15 menit sejak /pay, dari `expiresAt`). Sisanya kecil di bawahnya.
+ *
+ * Kode unik ditulis sebagai keterangan "sudah termasuk kode unik Rp N" — TANPA sorotan digit
+ * (kontrak: sorotan tiga digit terakhir belum tentu sama dengan kodenya, karena kode DITAMBAHKAN).
+ * Nomor rekening TIDAK ditulis di kode: backend mengirim rekening penampung environment-nya
+ * sendiri (prod `2083670928`, sandbox lain).
+ */
+function BniTransferInstructions({
+  order,
+  onCopy,
+  countdown,
+}: {
+  order: MintOrderDetail;
+  onCopy: (text: string) => void;
+  countdown: React.ReactNode;
+}) {
+  const account = order.virtualAccountNo;
+  const totalNum = order.totalPayIdr != null ? Number(order.totalPayIdr) : NaN;
+  // Floor, bukan round: `total_pay_idr` sudah dibulatkan ke bawah oleh backend; desimal ",00" di
+  // string-nya tidak boleh menggeser angka yang diketik orang di aplikasi bank.
+  const totalWhole = Number.isFinite(totalNum) ? Math.floor(totalNum) : null;
+  const code = uniqueCodeAmount(order.uniqueCode);
+  return (
+    <div data-testid="instruksi-transfer-bni" className="flex flex-col gap-4 rounded-xl bg-muted p-4">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 items-center justify-center rounded bg-white px-1.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={BANK_BRAND.BNI.logo} alt="BNI" className="max-h-4 w-auto object-contain" />
+        </span>
+        <span className="text-sm font-medium text-foreground">{CHECKOUT_COPY.bniTransferTitle}</span>
+      </div>
+
+      {/* 1 · Nominal */}
+      {totalWhole !== null && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniExactAmountLabel}</p>
+          <div className="flex items-center justify-between gap-2">
+            <span
+              data-testid="nominal-transfer-bni"
+              className="text-3xl leading-9 font-semibold text-foreground tabular-nums"
+            >
+              {formatIDR(totalWhole)}
+            </span>
+            {/* Yang disalin angka bulat tanpa titik ribuan — itu yang diterima kolom nominal
+                aplikasi bank. */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onCopy(String(totalWhole))}
+              aria-label={CHECKOUT_COPY.copyTotalAriaLabel}
+            >
+              <Copy /> Salin
+            </Button>
+          </div>
+          {code !== null && (
+            <p className="text-xs text-muted-foreground" data-testid="kode-unik">
+              {CHECKOUT_COPY.bniIncludesUniqueCode(formatIDR(code))}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 2 · Rekening tujuan */}
+      <div className="flex flex-col gap-1">
+        <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniAccountLabel}</p>
+        <div className="flex items-center justify-between gap-2">
+          <span
+            data-testid="rekening-bni"
+            className="min-w-0 font-mono text-xl font-semibold tracking-wider text-foreground"
+          >
+            {account ? groupDigits(account) : "—"}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onCopy(account ?? "")}
+            aria-label={CHECKOUT_COPY.copyBniAccountAriaLabel}
+            disabled={!account}
+          >
+            <Copy /> Salin
+          </Button>
+        </div>
+      </div>
+
+      {/* 3 · Sisa waktu */}
+      {countdown && (
+        <div className="flex items-center justify-between gap-3 rounded-lg bg-card px-3 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <Clock aria-hidden className="size-4" />
+            {CHECKOUT_COPY.bniCountdownLabel}
+          </span>
+          <span className="text-lg font-semibold text-foreground tabular-nums">{countdown}</span>
+        </div>
+      )}
+
+      {/* R6 — hanya kanal real-time. Teks dikutip dari SOT §4.3.12. */}
+      <Alert tone="warning">
+        <span data-testid="kanal-bni">
+          {CHECKOUT_COPY.bniExactWarning} {CHECKOUT_COPY.bniChannelLead}{" "}
+          <strong>{CHECKOUT_COPY.bniChannelBiFast}</strong>.{" "}
+          <strong>{CHECKOUT_COPY.bniChannelNoSkn}</strong> {CHECKOUT_COPY.bniChannelTail}
+        </span>
+      </Alert>
+
+      {/* Rincian (termasuk baris kode unik) ada di accordion "Rincian pesanan" di bawah panel —
+          tidak diulang di sini supaya satu angka tidak punya dua tabel. */}
+      <p className="flex items-center gap-2 text-sm font-medium text-foreground" role="status">
+        <Loader2 aria-hidden className="size-4 animate-spin text-muted-foreground" />
+        {CHECKOUT_COPY.bniWaiting}
+      </p>
+    </div>
+  );
+}
+
+/**
  * Instrumen bayar — nomor VA, total, dan semua yang menempel padanya.
  *
  * Figma A2 (`2610:19999`) membungkus keempatnya dalam SATU panel dalam ber-latar `muted`
@@ -321,6 +448,10 @@ function PaymentInstructions({
   countdown: React.ReactNode;
   extendedNote: string | null;
 }) {
+  // `extendedNote` sengaja tidak dipakai untuk Transfer BNI: label "Sisa waktu transfer" sudah
+  // menyebut tenggat mana yang dihitung (15 menit sejak /pay, bukan batas memilih metode).
+  if (order.paymentChannel === "BANK_TRANSFER")
+    return <BniTransferInstructions order={order} countdown={countdown} onCopy={onCopy} />;
   if (order.paymentChannel === "QRIS")
     return (
       <QrisInstruction
@@ -426,6 +557,27 @@ function HowToPay({
             <li>Pastikan nominal sesuai, lalu konfirmasi pembayaran.</li>
           </ol>
         </Accordion>
+      ) : channel === "BANK_TRANSFER" ? (
+        // Teks VA ("masukkan nomor Virtual Account") TIDAK dipakai di sini: tujuannya rekening
+        // biasa, dan yang membuat transfernya dikenali adalah nominalnya. Hanya kanal real-time
+        // (R6): sesama BNI atau BI-FAST.
+        <>
+          <Accordion title="Dari rekening BNI (wondr / BNI Mobile Banking / ATM BNI)">
+            <ol className="list-decimal space-y-1 pl-4">
+              <li>Pilih menu Transfer ke sesama rekening BNI.</li>
+              <li>Masukkan nomor rekening tujuan di atas.</li>
+              <li>Masukkan nominal tepat sampai digit terakhir, lalu konfirmasi.</li>
+            </ol>
+          </Accordion>
+          <Accordion title="Dari bank lain (BI-FAST)">
+            <ol className="list-decimal space-y-1 pl-4">
+              <li>Pilih Transfer antar bank dengan layanan BI-FAST, bank tujuan BNI.</li>
+              <li>Masukkan nomor rekening tujuan di atas.</li>
+              <li>Masukkan nominal tepat sampai digit terakhir, lalu konfirmasi.</li>
+              <li>Jangan pakai SKN/kliring — tidak didukung.</li>
+            </ol>
+          </Accordion>
+        </>
       ) : (
         <>
           <Accordion title="Transfer dari bank lain (antar bank)">
@@ -446,7 +598,14 @@ function HowToPay({
       <Accordion title="Catatan penting">
         <ul className="list-disc space-y-1 pl-4">
           <li>Pastikan nama rekening sama dengan nama di akun USDX.</li>
-          <li>Transfer nominal persis seperti tertera.</li>
+          {channel === "BANK_TRANSFER" ? (
+            <>
+              <li>Transfer nominal persis seperti tertera, termasuk kode unik.</li>
+              <li>Satu transfer untuk satu pesanan — jangan dipecah.</li>
+            </>
+          ) : (
+            <li>Transfer nominal persis seperti tertera.</li>
+          )}
           <li>Saldo USDX masuk otomatis setelah pembayaran terkonfirmasi.</li>
           {isSimulation && <li>Mode simulasi — pembayaran tidak diproses ke bank sungguhan.</li>}
         </ul>
@@ -481,7 +640,10 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
   const pgFeeKnown = order.pgFeeIdr !== null && Number.isFinite(Number(order.pgFeeIdr));
   const pgFee = pgFeeKnown ? Number(order.pgFeeIdr) : 0;
   if (![subtotal, mintFee, total].every(Number.isFinite)) return null;
-  const residual = Math.round(total - subtotal - mintFee - pgFee);
+  // Kode unik Transfer BNI dikirim backend apa adanya (`uniqueCode`) — barisnya memakai angka itu,
+  // bukan menebaknya dari selisih.
+  const code = uniqueCodeAmount(order.uniqueCode);
+  const residual = Math.round(total - subtotal - mintFee - pgFee - (code ?? 0));
 
   return (
     <div className="flex flex-col gap-2 pt-1">
@@ -491,7 +653,13 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
         </DetailRow>
       )}
       <DetailRow label={CHECKOUT_COPY.usdxValueLabel}>{formatIDR(subtotal)}</DetailRow>
-      <DetailRow label={`${CHECKOUT_COPY.mintFeeLabel} (${order.mintFeePct}%)`}>
+      <DetailRow
+        label={
+          order.mintFeePct
+            ? `${CHECKOUT_COPY.mintFeeLabel} (${order.mintFeePct}%)`
+            : CHECKOUT_COPY.mintFeeLabel
+        }
+      >
         {formatIDR(mintFee)}
       </DetailRow>
       {pgFeeKnown && (
@@ -500,8 +668,11 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
       {/* Provider yang memakai kode unik (BNI) menempelkannya ke total — tanpa baris ini
           rincian tidak menjumlah ke angka yang benar-benar ditagih. Sisa NEGATIF mustahil
           sebagai kode unik, jadi labelnya netral: kami tak mengarang sebabnya. */}
+      {code !== null && (
+        <DetailRow label={CHECKOUT_COPY.uniqueCodeLabel}>{formatIDR(code)}</DetailRow>
+      )}
       {residual !== 0 && (
-        <DetailRow label={pgFeeKnown && residual > 0 ? "Kode unik" : "Penyesuaian"}>
+        <DetailRow label={code === null && pgFeeKnown && residual > 0 ? CHECKOUT_COPY.uniqueCodeLabel : "Penyesuaian"}>
           {formatIDR(residual)}
         </DetailRow>
       )}
@@ -533,6 +704,15 @@ function PaymentDetails({
     <Accordion title="Detail pembayaran">
       {order.paymentChannel === "QRIS" ? (
         <DetailRow label="Metode">QRIS</DetailRow>
+      ) : order.paymentChannel === "BANK_TRANSFER" ? (
+        <>
+          <DetailRow label="Metode">{CHECKOUT_COPY.bniTransferTitle}</DetailRow>
+          {order.virtualAccountNo && (
+            <DetailRow label="Rekening tujuan">
+              <span className="font-mono">BNI {groupDigits(order.virtualAccountNo)}</span>
+            </DetailRow>
+          )}
+        </>
       ) : (
         // paymentChannel bisa null pada data lama/aneh — jangan mengarang "Virtual Account".
         <>
@@ -785,8 +965,9 @@ function DeadState({ order, onBack }: { order: MintOrderDetail; onBack: () => vo
         {gagalBukanKedaluwarsa ? "Transaksi gagal." : "Pesanan kedaluwarsa."}
       </p>
       <p className="text-xs text-muted-foreground">
-        Nomor Virtual Account pesanan ini sudah tidak berlaku. Mulai pesanan baru dari aplikasi
-        USDX.
+        {order.paymentChannel === "BANK_TRANSFER"
+          ? CHECKOUT_COPY.bniExpiredBody
+          : "Nomor Virtual Account pesanan ini sudah tidak berlaku. Mulai pesanan baru dari aplikasi USDX."}
       </p>
       <BackButton onClick={onBack} />
     </div>

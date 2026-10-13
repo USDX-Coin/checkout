@@ -4,7 +4,11 @@
 
 import type { VA_BANKS } from "@/lib/constants";
 
-export type PaymentChannel = "VA" | "QRIS";
+// `BANK_TRANSFER` (D25, `sot/api/common.yaml` PaymentChannel): transfer langsung ke rekening BNI
+// penampung, nominal + kode unik. Sengaja nilai baru, bukan `VA` + `BNI`: pasangan itu sudah
+// berarti VA BNI DurianPay, dan kedua metode bisa ditawarkan bersamaan. Kontrak menyatakan enum
+// ini TERBUKA — channel yang tak dikenal tidak dirender sebagai pilihan (lihat pemilih metode).
+export type PaymentChannel = "VA" | "QRIS" | "BANK_TRANSFER";
 
 // Apakah pembayaran order ini benar-benar diproses ke bank, atau cuma disimulasikan mock
 // provider. Dikirim backend (mint-order.serializer.ts), diturunkan dari provider per-order.
@@ -42,9 +46,43 @@ export type MintOrderStatus =
   | "FAILED"
   | "HELD"; // cermin denormalisasi dari paymentStatus HELD
 
-// Satu channel pembayaran yang ditawarkan (VA bawa daftar bank; QRIS tidak).
+/** Bentuk biaya metode (`sot/api/payment-methods.yaml` PaymentFeeType). */
+export type PaymentFeeType = "FLAT_IDR" | "PERCENT";
+
+/**
+ * Alasan sebuah opsi tampil tapi tidak bisa dipilih UNTUK ORDER INI (`api/mint.yaml`
+ * ChannelOption.unavailableReason, rev-17). Enum terbuka: nilai yang tak dikenal tetap
+ * ditampilkan non-aktif dengan teks umum.
+ */
+export type ChannelUnavailableReason = "AMOUNT_ABOVE_METHOD_MAX" | (string & {});
+
+/**
+ * Estimasi satu bank (= satu baris `payment_methods`) di dalam channel (`api/mint.yaml`
+ * ChannelBankOption, rev-16/17). Biaya kini per metode, jadi tiap bank membawa total sendiri.
+ */
+export interface MintChannelBankOption {
+  paymentMethodId: string;
+  /** Null hanya untuk QRIS. */
+  bank: VaBank | null;
+  feeType: PaymentFeeType;
+  feeValue: string;
+  pgFeeIdr: string;
+  /** subtotal + mint fee + biaya bank ini (floor). `BANK_TRANSFER`: BELUM termasuk kode unik. */
+  estimatedTotalPayIdr: string;
+  /** Rev-17 R8 — `BANK_TRANSFER`: + 999 (batas atas kode unik); lainnya = estimatedTotalPayIdr. */
+  estimatedTotalPayMaxIdr?: string;
+  /** Absen = true (backend lama). */
+  available?: boolean;
+  unavailableReason?: ChannelUnavailableReason | null;
+  maxAmountIdr?: string | null;
+}
+
+// Satu channel pembayaran yang ditawarkan. Daftar, urutan, dan biayanya diatur admin dari
+// back-office (`payment_methods`, rev-16) — checkout cuma menggambar apa yang dikirim, dalam
+// URUTAN yang dikirim.
 export interface MintChannelOption {
   channel: PaymentChannel;
+  /** Biaya bank TERMURAH di channel ini (rev-16). Rincian per bank di `bankOptions[]`. */
   pgFeeIdr: string;
   banks: VaBank[] | null;
   // Bank yang DITAMPILKAN tapi belum bisa dipilih — ditandai "Segera hadir" (USDX-622).
@@ -53,6 +91,26 @@ export interface MintChannelOption {
   // tiap aktivasi cukup satu perubahan di server dan halaman ini ikut sendiri. Opsional — response
   // tanpa field ini (adapter mock/BNI) berperilaku persis seperti sebelumnya.
   disabledBanks?: VaBank[];
+  // ── Estimasi harga PER METODE (D25, `api/mint.yaml` ChannelOption) ─────────────────────────
+  // Kurs beli beda per metode (Transfer BNI = kurs BNI dari wondr; Virtual Account = dasar + Y%).
+  // Semuanya ESTIMASI — `/pay` membaca ulang kurs lalu mengunci. Opsional: backend sebelum D25
+  // tidak mengirimnya, dan pemilih metode jatuh ke perhitungan lama (total order + pgFee).
+  rateAdjustmentPct?: string | null;
+  effectiveRate?: string;
+  /** `BANK_TRANSFER`: kapan kurs BNI terakhir diperbarui admin. `VA`: null. */
+  rateUpdatedAt?: string | null;
+  subtotalIdr?: string;
+  mintFeeIdr?: string;
+  /** subtotal + mint fee + pg fee (floor). `BANK_TRANSFER`: BELUM termasuk kode unik. */
+  estimatedTotalPayIdr?: string;
+  /** Rev-17 R8 — satu-satunya dasar penanda "Paling hemat". */
+  estimatedTotalPayMaxIdr?: string;
+  /** Rev-17 — false = opsi tampil tapi tidak bisa dipilih untuk order ini. Absen = true. */
+  available?: boolean;
+  unavailableReason?: ChannelUnavailableReason | null;
+  maxAmountIdr?: string | null;
+  /** Rev-16 — satu entri per bank yang bisa dipilih (urutan = `banks`). Absen di backend lama. */
+  bankOptions?: MintChannelBankOption[];
 }
 
 // Detail order mint (GET /v2/mint/{id} + setelah /pay). View model FE — field
@@ -66,17 +124,27 @@ export interface MintOrderDetail {
   chain: string;
   inputCurrency: AmountCurrency;
   amount: string;
-  baseRate: string;
-  spreadBuyPct: string;
-  effectiveRate: string;
-  subtotalIdr: string;
-  mintFeePct: string;
-  mintFeeIdr: string;
-  totalBeforePgFeeIdr: string; // "Total Pembayaran" sebelum biaya layanan PG
+  // D25: field harga order bernilai null selama REQUESTED — kurs beda per metode dan baru dikunci
+  // di `/pay`. Estimasinya ada per metode di `channels[]`.
+  baseRate: string | null;
+  spreadBuyPct: string | null;
+  /** D25 — `Y` untuk Virtual Account; null untuk Transfer BNI dan selama REQUESTED. */
+  rateAdjustmentPct?: string | null;
+  effectiveRate: string | null;
+  subtotalIdr: string | null;
+  mintFeePct: string | null;
+  mintFeeIdr: string | null;
+  totalBeforePgFeeIdr: string | null; // "Total Pembayaran" sebelum biaya layanan PG
   paymentChannel: PaymentChannel | null;
   pgFeeIdr: string | null;
   totalFeeIdr: string | null;
   totalPayIdr: string | null;
+  /**
+   * D25 — kode unik (001–999) yang SUDAH DITAMBAHKAN ke `totalPayIdr` (Transfer BNI saja).
+   * Ditampilkan sebagai keterangan "sudah termasuk kode unik Rp N", tanpa sorotan digit.
+   * Null untuk VA / sebelum /pay; absen di backend lama.
+   */
+  uniqueCode?: string | null;
   paymentBank: VaBank | null;
   paymentStatus: MintPaymentStatus;
   safeStatus: MintSafeStatus;
@@ -86,6 +154,7 @@ export interface MintOrderDetail {
   // dikenal FE) harus jatuh ke perlakuan LIVE — banner "pembayaran tidak diproses ke bank
   // sungguhan" tak boleh muncul kecuali backend benar-benar bilang "SIMULATION".
   paymentMode?: PaymentMode;
+  /** Nomor VA (channel VA). `BANK_TRANSFER` (D25): nomor rekening BNI penampung. */
   virtualAccountNo: string | null;
   paymentUrl: string | null;
   paymentRef: string | null;
@@ -100,7 +169,8 @@ export interface MintOrderDetail {
   channels?: MintChannelOption[];
 }
 
-// Body POST /v2/mint/{id}/pay. `bank` wajib saat channel = VA.
+// Body POST /v2/mint/{id}/pay. `bank` wajib saat channel = VA, dan wajib `BNI` saat channel =
+// `BANK_TRANSFER` (D25).
 export interface PayMintOrderRequest {
   channel: PaymentChannel;
   bank?: VaBank | null;

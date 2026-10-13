@@ -14,6 +14,18 @@ export function formatIDR(value: number): string {
   }).format(value)}`;
 }
 
+// Kurs per USDX untuk dibaca manusia: angka bulat tanpa desimal ("Rp 16.200"), selain itu tepat
+// dua desimal ("Rp 16.412,50"). Kurs TIDAK dibulatkan ke rupiah seperti `formatIDR` — membulatkan
+// 16.412,50 jadi 16.413 mengubah harga yang dipakai orang untuk memeriksa hitungannya sendiri.
+export function formatRate(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const whole = Number.isInteger(value);
+  return `Rp ${new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: whole ? 0 : 2,
+  }).format(value)}`;
+}
+
 // Jumlah token untuk dibaca manusia. Figma menulis "62,092307 USDX": koma desimal Indonesia,
 // tanpa nol berekor. `maximumFractionDigits: 6` mengikuti presisi yang dikirim backend; angka
 // bulat tetap tampil bulat ("250 USDX", bukan "250,000000 USDX").

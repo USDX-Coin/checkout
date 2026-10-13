@@ -46,9 +46,12 @@ export function PartnerOrderSummary({
   const usdxAmount = formatUsdxAmount(order.amount);
   const destination = formatDestination(order.userAddress, order.chain);
 
-  const subtotal = Number(order.subtotalIdr);
-  const mintFee = Number(order.mintFeeIdr);
-  const base = Number(order.totalBeforePgFeeIdr);
+  // Field harga bertipe nullable (dipakai bersama jalur konsumen D25). `Number(null)` = 0 akan
+  // terbaca sebagai Rp 0, jadi null diperlakukan "tidak diketahui".
+  const asNum = (v: string | null) => (v == null ? NaN : Number(v));
+  const subtotal = asNum(order.subtotalIdr);
+  const mintFee = asNum(order.mintFeeIdr);
+  const base = asNum(order.totalBeforePgFeeIdr);
 
   // Total ditentukan SERVER kalau ia sudah mengirimnya; kalau belum (metode belum dipilih), ia
   // dihitung dari total-sebelum-biaya-PG + biaya VA yang ditawarkan. Kalau biaya VA pun belum

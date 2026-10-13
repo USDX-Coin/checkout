@@ -812,3 +812,117 @@ describe("keadaan tak dikenal jatuh ke fallback yang aman, bukan ke tagihan", ()
     });
   });
 });
+
+// D25 (USDX-764) — instruksi Transfer BNI setelah /pay. Kontrak: `sot/api/mint.yaml` MintOrder
+// (`virtualAccountNo` = rekening penampung, `totalPayIdr` sudah termasuk `uniqueCode`), pola UX
+// `sot/phase-2/week2.md` § Checkout, R6 `sot/bni-integration.md` §4.3.12.
+describe("instruksi Transfer BNI (D25)", () => {
+  const BNI_MENUNGGU = makeOrder({
+    paymentChannel: "BANK_TRANSFER",
+    paymentBank: "BNI",
+    paymentProvider: "BNI",
+    virtualAccountNo: "2083670928",
+    rateAdjustmentPct: null,
+    effectiveRate: "16200.00",
+    subtotalIdr: "81000.00",
+    mintFeeIdr: "810.00",
+    pgFeeIdr: "0.00",
+    totalFeeIdr: "810.00",
+    totalPayIdr: "82227.00",
+    uniqueCode: "417",
+    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+  });
+
+  describe("positive", () => {
+    test("nominal tepat, rekening penampung dari backend, dan keterangan kode unik", () => {
+      renderWith(BNI_MENUNGGU);
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("Rp 82.227");
+      expect(screen.getByTestId("rekening-bni")).toHaveTextContent("2083 6709 28");
+      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik Rp 417");
+      expect(screen.getByText("Sisa waktu transfer")).toBeInTheDocument();
+    });
+
+    test("R6: hanya kanal real-time — rekening BNI atau BI-FAST, SKN/kliring tidak didukung", () => {
+      renderWith(BNI_MENUNGGU);
+      const kanal = screen.getByTestId("kanal-bni");
+      expect(kanal).toHaveTextContent("Transfer dari rekening BNI atau lewat BI-FAST");
+      expect(kanal).toHaveTextContent("SKN/kliring tidak didukung");
+    });
+
+    test("salin nominal menyalin angka bulat tanpa titik ribuan", () => {
+      const writeText = vi.fn();
+      Object.assign(navigator, { clipboard: { writeText } });
+      renderWith(BNI_MENUNGGU);
+      fireEvent.click(screen.getByRole("button", { name: "Salin total bayar" }));
+      expect(writeText).toHaveBeenCalledWith("82227");
+    });
+  });
+
+  describe("negative", () => {
+    test("tidak memakai teks Virtual Account dan tidak menyorot digit", () => {
+      const { container } = renderWith(BNI_MENUNGGU);
+      expect(screen.queryByText("Nomor Virtual Account")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Masukkan nomor Virtual Account/)).not.toBeInTheDocument();
+      // Tiga digit terakhir tidak dipisah ke elemen sendiri.
+      expect(screen.getByTestId("nominal-transfer-bni").children).toHaveLength(0);
+      expect(container.querySelector("mark")).toBeNull();
+    });
+
+    test("kedaluwarsa → tagihan BNI hilang, diganti peringatan jangan transfer", () => {
+      renderWith(
+        { ...BNI_MENUNGGU, paymentStatus: "EXPIRED", status: "FAILED" },
+        { isExpired: true },
+      );
+      expect(screen.queryByTestId("instruksi-transfer-bni")).not.toBeInTheDocument();
+      expect(screen.getByText(/Jangan transfer ke rekening tadi/)).toBeInTheDocument();
+    });
+  });
+
+  describe("edge cases", () => {
+    test("uniqueCode di luar kontrak (000) → keterangan kode unik tidak tampil", () => {
+      renderWith({ ...BNI_MENUNGGU, uniqueCode: "000" });
+      expect(screen.queryByTestId("kode-unik")).not.toBeInTheDocument();
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("Rp 82.227");
+    });
+
+    test("rincian memuat baris kode unik dari backend, bukan tebakan dari selisih", () => {
+      renderWith(BNI_MENUNGGU);
+      fireEvent.click(screen.getByText("Rincian pesanan"));
+      expect(screen.getAllByText("Kode unik").length).toBeGreaterThan(0);
+    });
+
+    test("REQUESTED dengan kartu Transfer BNI dari channels[] — tanpa kartu statis 'Segera hadir'", () => {
+      renderWith(
+        makeOrder({
+          paymentStatus: "REQUESTED",
+          paymentChannel: null,
+          paymentBank: null,
+          virtualAccountNo: null,
+          baseRate: null,
+          effectiveRate: null,
+          subtotalIdr: null,
+          mintFeeIdr: null,
+          totalBeforePgFeeIdr: null,
+          pgFeeIdr: null,
+          totalFeeIdr: null,
+          totalPayIdr: null,
+          channels: [
+            {
+              channel: "BANK_TRANSFER",
+              pgFeeIdr: "0.00",
+              banks: ["BNI"],
+              effectiveRate: "16200.00",
+              subtotalIdr: "81000.00",
+              mintFeeIdr: "810.00",
+              estimatedTotalPayIdr: "81810.00",
+              estimatedTotalPayMaxIdr: "82809.00",
+            },
+          ],
+        }),
+      );
+      expect(screen.getByRole("radio", { name: /Transfer BNI/ })).toBeEnabled();
+      expect(screen.queryByText("Transfer bank BNI")).not.toBeInTheDocument();
+      expect(screen.queryByText("Segera hadir")).not.toBeInTheDocument();
+    });
+  });
+});
