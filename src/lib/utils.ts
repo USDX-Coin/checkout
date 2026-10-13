@@ -7,11 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 
 // Tampilkan IDR sebagai rupiah bulat (tanpa ,00 di belakang) biar bersih dibaca —
 // nominal otoritatif tetap dari backend (string desimal); ini display-only.
+// Pecahan dibulatkan KE BAWAH, sama seperti backend membulatkan total (`api/mint.yaml`
+// § totalPayIdr: "desimal dibulatkan ke bawah"). Dengan pembulatan biasa, subtotal
+// Rp 163.312,50 tampil Rp 163.313 sementara totalnya Rp 167.312 — rinciannya tidak
+// menjumlah ke total yang ditagih (dev, 13 Okt 2026).
 export function formatIDR(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `Rp ${new Intl.NumberFormat("id-ID", {
     maximumFractionDigits: 0,
-  }).format(value)}`;
+  }).format(Math.floor(value))}`;
 }
 
 // Kurs per USDX untuk dibaca manusia: angka bulat tanpa desimal ("Rp 16.200"), selain itu tepat
