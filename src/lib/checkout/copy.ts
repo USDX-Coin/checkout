@@ -33,7 +33,9 @@ export const CHECKOUT_COPY = {
       ? "Batas bayar QRIS"
       : channel === "VA"
         ? "Batas bayar Virtual Account"
-        : "Batas bayar",
+        : channel === "BANK_TRANSFER"
+          ? "Batas transfer"
+          : "Batas bayar",
   countdownExtendedNote: (channel: string | null): string =>
     channel === "QRIS"
       ? "Waktu bayar diperpanjang untuk QRIS ini."
@@ -101,11 +103,11 @@ export const CHECKOUT_COPY = {
   leaveNote: (channel: string | null): string =>
     channel === "QRIS"
       ? "QR ini tetap berlaku sampai waktu habis. Pesanan ini ada di Riwayat aplikasi USDX."
-      : "VA tetap berlaku sampai waktu habis. Pesanan ini ada di Riwayat aplikasi USDX.",
+      : channel === "BANK_TRANSFER"
+        ? "Rekening dan nominal ini berlaku sampai waktu habis. Pesanan ini ada di Riwayat aplikasi USDX."
+        : "VA tetap berlaku sampai waktu habis. Pesanan ini ada di Riwayat aplikasi USDX.",
 
   // ── Pilih metode (temuan D4) ───────────────────────────────────────────────────────────────
-  // Angka yang benar-benar harus dibayar dulu baru muncul SETELAH metode diklik.
-  totalDependsOnMethodNote: "Angka pastinya mengikuti metode yang kamu pilih.",
   // Judul grup radio kedua (Figma `50` blok A, state A1b). Sekaligus nama grup yang dibacakan
   // pembaca layar lewat `aria-label`.
   chooseBankLabel: "Pilih bank",
@@ -131,15 +133,53 @@ export const CHECKOUT_COPY = {
   payCta: "Bayar sekarang",
   pickMethodHint: "Pilih metode pembayaran untuk lanjut.",
   pickBankHint: "Pilih bank dulu untuk lanjut.",
-  // Kartu metode KEDUA di Figma A1a/A1b (`2639:31820`), digambar mati dengan badge gold.
-  // Ia tidak datang dari `channels[]` dan tidak boleh: transfer bank langsung memang belum
-  // ada di backend, dan justru itu yang diberitahukan kartunya. Keputusan pemilik produk
-  // 5 September 2026 — lihat SELISIH-FIGMA-CHECKOUT.md §10.2 yang dibatalkan olehnya.
-  directTransferTitle: "Transfer bank BNI",
-  comingSoonBadge: "Segera hadir",
+  // ── Dua metode + dua kurs (D25, `sot/bni-integration.md` §4.3; desain PM 2 Okt 2026) ──────
+  // Kartu "Transfer bank BNI · Segera hadir" yang dulu digambar mati di sini sudah dicabut: semua
+  // kartu metode kini datang dari `channels[]` — daftar, urutan, dan biayanya diatur admin dari
+  // back-office (rev-16). Label untuk nasabah: "Transfer BNI" dan "Virtual Account" (§4.3.3).
+  bniTransferTitle: "Transfer BNI",
+  vaTitle: "Virtual Account",
+  // week2.md § Checkout: "Kurs BNI Rp X, sesuai aplikasi wondr".
+  bniRateLine: (rate: string): string => `Kurs BNI ${rate}, sesuai aplikasi wondr`,
+  rateUpdatedAt: (when: string): string => `Diperbarui ${when}`,
+  cheapestBadge: "Paling hemat",
+  pickMethodCta: "Pilih metode pembayaran",
+  payAmountCta: (amount: string): string => `Bayar ${amount}`,
+  // Rev-17 R8: total Transfer BNI sebelum /pay belum memuat kode unik (maks +999).
+  uniqueCodeEstimateNote: "Saat bayar ditambah kode unik (maks. Rp 999) supaya transfer kamu dikenali.",
+  // Opsi yang tampil tapi tidak bisa dipilih untuk order ini (rev-17, `unavailableReason`).
+  unavailableBadge: "Tidak tersedia",
+  unavailableAboveMax: (max: string | null): string =>
+    max
+      ? `Total pesanan ini melebihi batas ${max} per transaksi untuk metode ini.`
+      : "Total pesanan ini melebihi batas per transaksi untuk metode ini.",
+  unavailableGeneric: "Metode ini tidak bisa dipakai untuk pesanan ini.",
+  noMethodAvailable: "Belum ada metode pembayaran yang bisa dipakai untuk pesanan ini.",
+
+  // ── Instruksi Transfer BNI (desain PM 2 Okt 2026 + rev-17 R6) ──────────────────────────────
+  bniExactAmountLabel: "Transfer tepat",
+  // Kode unik ditulis sebagai keterangan, TANPA sorotan digit (week2.md § Checkout, D25).
+  bniIncludesUniqueCode: (amount: string): string => `sudah termasuk kode unik ${amount}`,
+  bniAccountLabel: "Ke rekening BNI",
+  copyBniAccountAriaLabel: "Salin nomor rekening BNI",
+  bniAccountName: (name: string): string => `a.n. ${name}`,
+  bniCountdownLabel: "Sisa waktu transfer",
+  uniqueCodeLabel: "Kode unik",
+  bniExactWarning: "Transfer persis sampai digit terakhir, dalam satu kali transfer.",
+  // R6 — `sot/bni-integration.md` §4.3.12, teks instruksi dikutip apa adanya.
+  bniChannelLead: "Transfer dari rekening BNI atau lewat",
+  bniChannelBiFast: "BI-FAST",
+  bniChannelNoSkn: "SKN/kliring tidak didukung",
+  bniChannelTail: "— dana yang tiba setelah batas waktu akan tertahan dan diproses manual.",
+  bniWaiting: "Menunggu transfer kamu",
+  bniExpiredBody:
+    "Batas waktu transfer pesanan ini sudah lewat. Jangan transfer ke rekening tadi untuk pesanan ini — mulai pesanan baru dari aplikasi USDX.",
 
   // ── Tabel rincian biaya (Figma `kelompok ringkasan · 06f Opsi 3`) ──────────────────────────
   lockedRateLabel: "Kurs terkunci",
+  // Sebelum /pay kurs belum terkunci (D25-d) — label tanpa kata "terkunci".
+  rateLabel: "Kurs",
+  estimateNote: "Perkiraan. Angka final dikunci saat kamu menekan Bayar.",
   perUsdx: (rate: string): string => `${rate} / USDX`,
   usdxValueLabel: "Nilai USDX",
   mintFeeLabel: "Biaya mint",

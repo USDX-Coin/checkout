@@ -43,6 +43,7 @@ function CardChoice({
   description,
   icon,
   badge,
+  trailing,
   disabled = false,
   id,
   ...props
@@ -54,6 +55,12 @@ function CardChoice({
   icon?: React.ReactNode
   /** Feature label, e.g. "Segera hadir". Pass `false` to fall back to the description. */
   badge?: React.ReactNode | false
+  /**
+   * Isi kolom kanan sebelum ikon — mis. harga satu metode bayar di checkout (desain PM 2 Okt
+   * 2026: "nama + satu angka"). Ikut terbaca sebagai bagian nama radio, jadi pembaca layar
+   * mendengar "Transfer BNI, Rp 81.810, Paling hemat" — angkanya memang bagian dari pilihannya.
+   */
+  trailing?: React.ReactNode
   disabled?: boolean
 }) {
   const itemId = id ?? `choice-${value}`
@@ -120,6 +127,15 @@ function CardChoice({
           </Badge>
         )}
       </span>
+
+      {trailing && (
+        <span
+          data-slot="card-choice-trailing"
+          className={cn("flex shrink-0 items-center", disabled && "opacity-50")}
+        >
+          {trailing}
+        </span>
+      )}
 
       {icon && !showBadge && (
         <span

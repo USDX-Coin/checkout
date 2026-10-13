@@ -56,11 +56,16 @@ function RadioGroup({
         const step = ARROW_NEXT.has(event.key) ? 1 : ARROW_PREV.has(event.key) ? -1 : 0
         if (step === 0) return
 
+        // Hanya radio milik grup INI. Grup bisa memuat grup lain (checkout: lapis "Pilih bank"
+        // membuka di bawah kartu metode yang dipilih), dan handler capture grup luar berjalan
+        // lebih dulu. Tanpa saringan ini, panah di ubin bank akan melompat ke kartu metode dan
+        // MENGGANTI metode bayar — kunci itu milik grup dalam, biarkan ia yang menanganinya.
+        const group = event.currentTarget
+        const target = event.target as HTMLElement
+        if (target.closest("[data-slot=radio-group]") !== group) return
         const items = Array.from(
-          event.currentTarget.querySelectorAll<HTMLButtonElement>(
-            "[data-slot=radio-group-item]:not([disabled])"
-          )
-        )
+          group.querySelectorAll<HTMLButtonElement>("[data-slot=radio-group-item]:not([disabled])")
+        ).filter((el) => el.closest("[data-slot=radio-group]") === group)
         if (items.length === 0) return
 
         const focused = items.indexOf(document.activeElement as HTMLButtonElement)

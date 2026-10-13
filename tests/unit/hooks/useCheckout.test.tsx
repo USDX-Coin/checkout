@@ -633,3 +633,120 @@ describe("useCheckout — HELD menunggu putusan ops, jadi tetap di-poll", () => 
     });
   });
 });
+
+// D25 (USDX-764) — Transfer BNI lewat `/pay`. Penolakan /pay membiarkan order `REQUESTED`
+// (`sot/api/mint.yaml` mintV2Pay): pesan harus mengarahkan ke metode lain, dan `channels[]`
+// dimuat ulang supaya pilihan yang barusan ditolak tidak terus ditawarkan.
+describe("useCheckout — Transfer BNI (D25)", () => {
+  const ORDER_ID = "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012";
+  const REQUESTED = () =>
+    makeOrder({
+      paymentStatus: "REQUESTED",
+      paymentChannel: null,
+      paymentBank: null,
+      virtualAccountNo: null,
+      totalPayIdr: null,
+    });
+
+  function getCount() {
+    return fetchMock.mock.calls.filter(([, init]) => !init?.method || init.method === "GET").length;
+  }
+
+  describe("positive", () => {
+    test("pay('BANK_TRANSFER','BNI') mengirim body sesuai kontrak dan menyimpan instruksi BNI", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse(200, {
+              status: "success",
+              data: makeOrder({
+                paymentChannel: "BANK_TRANSFER",
+                paymentBank: "BNI",
+                paymentProvider: "BNI",
+                virtualAccountNo: "0115476151",
+                totalPayIdr: "81810417.00",
+                uniqueCode: "417",
+              }),
+            }),
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      await act(async () => {
+        await result.current.pay("BANK_TRANSFER", "BNI");
+      });
+      const payCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(payCall?.[1].body).toBe(JSON.stringify({ channel: "BANK_TRANSFER", bank: "BNI" }));
+      await waitFor(() => expect(result.current.order?.uniqueCode).toBe("417"));
+    });
+  });
+
+  describe("negative", () => {
+    test("503 UNIQUE_CODE_EXHAUSTED → arahkan ke Virtual Account, muat ulang order", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse(503, {
+              status: "error",
+              error: { code: "UNIQUE_CODE_EXHAUSTED", message: "penuh" },
+            }),
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      const before = getCount();
+      await act(async () => {
+        await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
+      });
+      await waitFor(() => expect(result.current.payError).toContain("Pilih Virtual Account"));
+      await waitFor(() => expect(getCount()).toBeGreaterThan(before));
+    });
+
+    test("422 (metode dimatikan / di atas batas) → pesan pilih lagi, muat ulang order", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse(422, {
+              status: "error",
+              error: { code: "VALIDATION_ERROR", message: "tidak ditawarkan" },
+            }),
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      const before = getCount();
+      await act(async () => {
+        await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
+      });
+      await waitFor(() => expect(result.current.payError).toContain("pilih lagi"));
+      await waitFor(() => expect(getCount()).toBeGreaterThan(before));
+    });
+  });
+
+  describe("edge cases", () => {
+    test("409 INVALID_ORDER_STATE TIDAK memicu muat ulang ekstra (order memang sudah terkunci)", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          return Promise.resolve(
+            jsonResponse(409, { status: "error", error: { code: "INVALID_ORDER_STATE", message: "x" } }),
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      const before = getCount();
+      await act(async () => {
+        await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
+      });
+      await waitFor(() => expect(result.current.payError).toContain("tidak lagi bisa memilih metode"));
+      expect(getCount()).toBe(before);
+    });
+  });
+});
