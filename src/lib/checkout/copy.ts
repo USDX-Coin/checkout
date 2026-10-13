@@ -162,6 +162,7 @@ export const CHECKOUT_COPY = {
   bniIncludesUniqueCode: (amount: string): string => `sudah termasuk kode unik ${amount}`,
   bniAccountLabel: "Ke rekening BNI",
   copyBniAccountAriaLabel: "Salin nomor rekening BNI",
+  bniAccountName: (name: string): string => `a.n. ${name}`,
   bniCountdownLabel: "Sisa waktu transfer",
   uniqueCodeLabel: "Kode unik",
   bniExactWarning: "Transfer persis sampai digit terakhir, dalam satu kali transfer.",

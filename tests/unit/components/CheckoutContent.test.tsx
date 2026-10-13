@@ -849,6 +849,11 @@ describe("instruksi Transfer BNI (D25)", () => {
       expect(kanal).toHaveTextContent("SKN/kliring tidak didukung");
     });
 
+    test("nama pemilik rekening dari backend tampil sebagai 'a.n. …'", () => {
+      renderWith({ ...BNI_MENUNGGU, collectionAccountName: "PT Contoh Penampung" });
+      expect(screen.getByTestId("nama-rekening-bni")).toHaveTextContent("a.n. PT Contoh Penampung");
+    });
+
     test("salin nominal menyalin angka bulat tanpa titik ribuan", () => {
       const writeText = vi.fn();
       Object.assign(navigator, { clipboard: { writeText } });
@@ -879,6 +884,15 @@ describe("instruksi Transfer BNI (D25)", () => {
   });
 
   describe("edge cases", () => {
+    test("collectionAccountName null / absen / kosong → baris nama tidak ada (tanpa hardcode)", () => {
+      for (const name of [null, undefined, "   "]) {
+        const { unmount } = renderWith({ ...BNI_MENUNGGU, collectionAccountName: name });
+        expect(screen.queryByTestId("nama-rekening-bni")).not.toBeInTheDocument();
+        expect(screen.queryByText(/a\.n\./)).not.toBeInTheDocument();
+        unmount();
+      }
+    });
+
     test("uniqueCode di luar kontrak (000) → keterangan kode unik tidak tampil", () => {
       renderWith({ ...BNI_MENUNGGU, uniqueCode: "000" });
       expect(screen.queryByTestId("kode-unik")).not.toBeInTheDocument();

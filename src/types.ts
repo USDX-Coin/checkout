@@ -156,6 +156,12 @@ export interface MintOrderDetail {
   paymentMode?: PaymentMode;
   /** Nomor VA (channel VA). `BANK_TRANSFER` (D25): nomor rekening BNI penampung. */
   virtualAccountNo: string | null;
+  /**
+   * `BANK_TRANSFER`: nama pemilik rekening penampung, dikirim backend per environment
+   * (keputusan PM 13 Okt 2026, backend#366 — belum tercatat di SOT). Null/absen = baris nama
+   * tidak ditampilkan; nama TIDAK PERNAH ditulis di kode FE.
+   */
+  collectionAccountName?: string | null;
   paymentUrl: string | null;
   paymentRef: string | null;
   paidAt: string | null;

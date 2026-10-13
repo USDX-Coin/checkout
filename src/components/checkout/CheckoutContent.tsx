@@ -328,6 +328,7 @@ function BniTransferInstructions({
   countdown: React.ReactNode;
 }) {
   const account = order.virtualAccountNo;
+  const accountName = order.collectionAccountName?.trim() || null;
   const totalNum = order.totalPayIdr != null ? Number(order.totalPayIdr) : NaN;
   // Floor, bukan round: `total_pay_idr` sudah dibulatkan ke bawah oleh backend; desimal ",00" di
   // string-nya tidak boleh menggeser angka yang diketik orang di aplikasi bank.
@@ -378,11 +379,20 @@ function BniTransferInstructions({
       <div className="flex flex-col gap-1">
         <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniAccountLabel}</p>
         <div className="flex items-center justify-between gap-2">
-          <span
-            data-testid="rekening-bni"
-            className="min-w-0 font-mono text-xl font-semibold tracking-wider text-foreground"
-          >
-            {account ? groupDigits(account) : "—"}
+          <span className="flex min-w-0 flex-col">
+            <span
+              data-testid="rekening-bni"
+              className="font-mono text-xl font-semibold tracking-wider text-foreground"
+            >
+              {account ? groupDigits(account) : "—"}
+            </span>
+            {/* Nama pemilik dari backend (`collectionAccountName`) — rekening penampung beda per
+                environment, jadi nama ikut backend. Null → barisnya tidak ada, bukan tebakan. */}
+            {accountName && (
+              <span data-testid="nama-rekening-bni" className="text-sm text-foreground">
+                {CHECKOUT_COPY.bniAccountName(accountName)}
+              </span>
+            )}
           </span>
           <Button
             type="button"
