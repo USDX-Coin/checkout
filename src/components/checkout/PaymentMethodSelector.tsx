@@ -1,49 +1,159 @@
 "use client";
 
-// Pemilih metode pembayaran checkout (USDX-224, port USDX-202): VA (dengan lapis bank) / QRIS,
-// lalu tabel rincian biaya, lalu tombol. Konfirmasi → POST /v2/mint/{id}/pay.
+// Pemilih metode pembayaran checkout. Konfirmasi → POST /v2/mint/{id}/pay.
 //
-// Bentuknya mengikuti Figma `TXzbmT9lo27cse6IwqSuEP`, board `50 · Checkout`, state A1a
-// (`2639:31770`) dan A1b (`2639:32156`). Tiga hal yang berubah dari versi sebelumnya, dan
-// alasannya:
+// Bentuk mengikuti desain PM 2 Okt 2026 (D25 — `sot/phase-2/week2.md` § Checkout,
+// `sot/bni-integration.md` §4.3), disambungkan ke kontrak rev-16/17:
 //
-//  1. Kartu metode memakai `ui/card-choice` (Figma "Card/Pilihan"), bukan `<label>` buatan
-//     tangan. Komponennya sudah ada di repo sejak PR 2 dan tingginya persis angka Figma —
-//     70 px dengan keterangan, 52 px tanpa — sementara versi tangan `p-3` memberi 66 px,
-//     menaruh badge ikon KOTAK BIRU TUA di kiri (Figma: ikon muted di kanan), dan menandai
-//     kartu terpilih dengan border 1 px alih-alih 2 px + wash 5 %. Melahirkan versi kedua dari
-//     komponen yang sudah ada persis temuan C12 yang sedang diberantas.
+//  1. DAFTAR — tiap baris cuma NAMA metode + SATU angka total. "Paling hemat" hanya menempel di
+//     opsi yang `estimatedTotalPayMaxIdr`-nya benar-benar terkecil (rev-17 R8: total TERMASUK kode
+//     unik, Transfer BNI +999 sebelum /pay). Tidak ada penanda tetap untuk metode tertentu.
+//  2. DETAIL membuka di bawah opsi yang diketuk: Transfer BNI → kurs BNI + sumbernya; Virtual
+//     Account → pilih bank (biaya per bank dari `bankOptions[]`). Lalu rincian harga metode itu.
+//  3. Tombol utama menyebut angkanya: "Bayar Rp X".
 //
-//  2. Rincian biaya SELALU TERBUKA di atas tombol (Figma `kelompok ringkasan · 06f Opsi 3`:
-//     kurs → biaya → total → tombol, lima baris h 20 jarak 8). Sebelumnya kelimanya terkunci
-//     di dalam `<details>` tertutup berjudul "Rincian biaya" di kelompok ringkasan atas, jadi
-//     di layar tempat orang memutuskan membayar satu-satunya angka yang terbaca adalah
-//     totalnya. Rincian yang harus diklik dulu bukan rincian yang dibaca.
+// TIDAK ADA kartu statis dan TIDAK ADA urutan yang dipatok di sini. Daftar metode, urutannya, dan
+// biayanya diatur admin dari back-office (`payment_methods`, rev-16 §4.3.11) dan sampai ke sini
+// lewat `channels[]` yang sudah urut `sortOrder` — begitu juga `banks`. Menyusun ulang di FE berarti
+// mengabaikan keputusan admin.
 //
-//  3. Dua grup radio bersaudara, bukan bersarang — dua RovingFocusGroup Radix yang bersarang
-//     akan berebut tombol panah. Desain juga menaruh bank sebagai baris sendiri berlabel
-//     "Pilih bank" di bawah daftar metode.
+// Yang dipertahankan dari versi sebelumnya:
+//  - Tidak ada yang dipra-pilih (Figma A1a): memilihkan metode diam-diam berarti memilihkan HARGA.
+//  - Bank di `disabledBanks` tampil "Segera hadir", bukan disembunyikan (USDX-622).
+//  - Pilihan direkonsiliasi tiap render: metode/bank yang hilang atau berubah tidak tersedia
+//    sesudah dipilih tidak boleh tetap bisa dibayar.
 
 import { useState } from "react";
 import { Landmark, Lock, QrCode } from "lucide-react";
-import type { MintChannelOption, PaymentChannel, VaBank } from "@/types";
+import type { MintChannelBankOption, MintChannelOption, PaymentChannel, VaBank } from "@/types";
 import { Badge } from "@/components/ui/badge";
-import { BANK_BRAND, QRIS_RED, sortVaBanks } from "@/lib/constants";
+import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
 import { Button } from "@/components/ui/button";
 import { CardChoice } from "@/components/ui/card-choice";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { formatIDR, cn } from "@/lib/utils";
+import { formatIDR, formatRate, formatWibDateTime, cn } from "@/lib/utils";
 
-function feeOf(option: MintChannelOption): number | null {
-  const n = Number(option.pgFeeIdr);
-  return option.pgFeeIdr && Number.isFinite(n) ? n : null;
+/** Channel yang bisa digambar halaman ini. Kontrak menyatakan enum `PaymentChannel` terbuka —
+ *  channel yang tak dikenal TIDAK ditawarkan: tombol bayar untuk instrumen yang instruksinya
+ *  tidak kita kenal adalah tombol yang menyuruh orang membayar tanpa tahu caranya. */
+const KNOWN_CHANNELS: ReadonlySet<string> = new Set<PaymentChannel>(["VA", "QRIS", "BANK_TRANSFER"]);
+
+// Angka opsional dari kontrak → number, atau null kalau absen/tak terbaca. `Number("")` dan
+// `Number(null)` sama-sama 0 — keduanya akan terbaca sebagai "Rp 0", jadi keduanya null.
+function num(v: string | null | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
-// Ikon merek per channel. Figma menaruhnya di KANAN kartu sebagai lingkaran ber-latar muted;
-// `ui/card-choice` menyediakan bingkai `size-8` di posisi itu, jadi yang dikirim ke sana cukup
-// isinya. QRIS memakai merah mereknya sendiri — QRIS adalah merek, bukan status.
+/** Absen = tersedia (backend sebelum rev-17 tidak mengirim field ini). */
+function isAvailable(o: { available?: boolean }): boolean {
+  return o.available !== false;
+}
+
+function channelTitle(channel: PaymentChannel): string {
+  if (channel === "BANK_TRANSFER") return CHECKOUT_COPY.bniTransferTitle;
+  if (channel === "QRIS") return "QRIS";
+  return CHECKOUT_COPY.vaTitle;
+}
+
+function unavailableText(o: { unavailableReason?: string | null; maxAmountIdr?: string | null }) {
+  if (o.unavailableReason === "AMOUNT_ABOVE_METHOD_MAX") {
+    const max = num(o.maxAmountIdr);
+    return CHECKOUT_COPY.unavailableAboveMax(max !== null ? formatIDR(max) : null);
+  }
+  return CHECKOUT_COPY.unavailableGeneric;
+}
+
+/** Angka-angka satu pilihan (channel, atau satu bank di dalamnya). Null = backend tak mengirim. */
+interface Priced {
+  total: number | null;
+  subtotal: number | null;
+  mintFee: number | null;
+  pgFee: number | null;
+  rate: number | null;
+}
+
+/** Harga ORDER — hanya dari backend sebelum D25, yang belum mengirim estimasi per metode. */
+interface LegacyOrderPrice {
+  totalBeforePgFeeIdr?: string | null;
+  subtotalIdr?: string | null;
+  mintFeeIdr?: string | null;
+  effectiveRate?: string | null;
+}
+
+/**
+ * Harga satu channel, dan — kalau bank sudah dipilih dan backend mengirim `bankOptions[]` — harga
+ * bank itu. Rev-16: biaya per METODE (bank); field tingkat channel = bank termurah.
+ *
+ * Backend sebelum D25 hanya mengirim harga ORDER + `pgFeeIdr` per channel. Untuk itu totalnya
+ * order + biaya layanan, persis perhitungan lama.
+ */
+export function priceOf(
+  option: MintChannelOption,
+  legacy: LegacyOrderPrice,
+  bankOption?: MintChannelBankOption | null,
+): Priced {
+  const estimate = num(bankOption?.estimatedTotalPayIdr) ?? num(option.estimatedTotalPayIdr);
+  const pgFee = num(bankOption?.pgFeeIdr) ?? num(option.pgFeeIdr);
+  if (estimate !== null) {
+    return {
+      total: estimate,
+      subtotal: num(option.subtotalIdr),
+      mintFee: num(option.mintFeeIdr),
+      pgFee,
+      rate: num(option.effectiveRate),
+    };
+  }
+  const base = num(legacy.totalBeforePgFeeIdr);
+  return {
+    total: base !== null && pgFee !== null ? base + pgFee : null,
+    subtotal: num(legacy.subtotalIdr),
+    mintFee: num(legacy.mintFeeIdr),
+    pgFee,
+    rate: num(legacy.effectiveRate),
+  };
+}
+
+/**
+ * Channel yang pantas diberi "Paling hemat" (rev-17 R8, `api/mint.yaml` ChannelOption).
+ *
+ * Dasarnya SATU-SATUNYA `estimatedTotalPayMaxIdr` — total termasuk batas atas kode unik. Kalau
+ * ada opsi tersedia yang tidak membawanya (backend lama), tidak ada penanda sama sekali:
+ * membandingkan total BNI tanpa kode unik dengan total VA bisa menobatkan opsi yang ternyata lebih
+ * mahal. Opsi `available=false` tidak pernah diberi penanda; seri = tidak ada penanda; satu opsi =
+ * tak ada pembanding.
+ */
+export function cheapestChannel(channels: MintChannelOption[]): PaymentChannel | null {
+  const candidates = channels.filter(isAvailable);
+  if (candidates.length < 2) return null;
+  const totals = candidates.map((c) => num(c.estimatedTotalPayMaxIdr));
+  if (totals.some((t) => t === null)) return null;
+  const min = Math.min(...(totals as number[]));
+  const atMin = candidates.filter((_, i) => totals[i] === min);
+  return atMin.length === 1 ? atMin[0].channel : null;
+}
+
+/**
+ * Bank-bank satu channel punya tarif berbeda (rev-16: biaya per metode). Selama bank belum
+ * dipilih, angka tingkat channel = bank TERMURAH — menyebutnya sebagai angka pasti menyesatkan,
+ * jadi ia diberi awalan "mulai".
+ */
+function bankFeesVary(option: MintChannelOption): boolean {
+  const opts = (option.bankOptions ?? []).filter(isAvailable);
+  return new Set(opts.map((o) => num(o.estimatedTotalPayIdr))).size > 1;
+}
+
 function channelIcon(channel: PaymentChannel) {
+  if (channel === "BANK_TRANSFER") {
+    return (
+      <span className="flex size-8 items-center justify-center rounded-full bg-white shadow-[inset_0_0_0_1px_var(--color-border)]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={BANK_BRAND.BNI.logo} alt="" className="max-h-3 w-auto max-w-6 object-contain" />
+      </span>
+    );
+  }
   return channel === "QRIS" ? (
     <span
       className="flex size-8 items-center justify-center rounded-full"
@@ -58,18 +168,6 @@ function channelIcon(channel: PaymentChannel) {
   );
 }
 
-// Keterangan kartu. Untuk VA, Figma menuliskan daftar banknya ("Mandiri · BRI · BNI") alih-alih
-// kalimat generik — daftar itu yang benar-benar menjawab "bisa transfer dari mana".
-function channelDescription(option: MintChannelOption): string {
-  if (option.channel === "QRIS") return CHECKOUT_COPY.qrisDescription;
-  const banks = sortVaBanks(option.banks ?? []);
-  return banks.length > 0
-    ? banks.map((b) => BANK_BRAND[b]?.name ?? b).join(" · ")
-    : CHECKOUT_COPY.vaDescriptionFallback;
-}
-
-// Satu baris tabel rincian. `strong` untuk baris total: Figma menebalkan LABEL dan NILAI-nya,
-// tanpa garis pemisah di atasnya — garis itu memecah tabel jadi dua tabel kecil.
 function FeeRow({
   label,
   value,
@@ -86,7 +184,7 @@ function FeeRow({
       </span>
       <span
         className={cn(
-          "flex flex-wrap items-center justify-end gap-x-1.5 text-right whitespace-nowrap",
+          "text-right whitespace-nowrap tabular-nums",
           strong ? "font-semibold text-foreground" : "text-foreground",
         )}
       >
@@ -96,50 +194,102 @@ function FeeRow({
   );
 }
 
+// Plat logo bank (Figma `2639:32218`/`2639:32219`): logo 24 px di tengah plat putih 48.
+function BankPlate({ bank, muted = false }: { bank: VaBank; muted?: boolean }) {
+  const brand = BANK_BRAND[bank];
+  return (
+    <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
+      {brand?.logo ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={brand.logo}
+          alt={muted ? "" : (brand?.name ?? bank)}
+          className={cn("max-h-6 w-auto max-w-full object-contain", muted && "grayscale")}
+        />
+      ) : (
+        <span className="text-sm font-extrabold tracking-tight" style={{ color: brand?.bg }}>
+          {brand?.mark ?? bank}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Bank yang tampil tapi tidak bisa dipilih — "Segera hadir" (metode belum aktif, USDX-622) atau
+// "Tidak tersedia" (metode aktif, tapi tidak untuk order ini — rev-17). Daftar biasa, BUKAN radio
+// mati di dalam RadioGroup: radio yang tak bisa dipilih tetap ikut urutan panah dan dibacakan
+// sebagai pilihan.
+function DeadBankList({
+  banks,
+  label,
+  badge,
+  badgeTone,
+}: {
+  banks: VaBank[];
+  label: string;
+  badge: string;
+  badgeTone: "coming-soon" | "neutral";
+}) {
+  if (banks.length === 0) return null;
+  return (
+    <ul className="grid grid-cols-3 gap-2" aria-label={label}>
+      {banks.map((b) => (
+        <li key={b} className="flex flex-col items-center gap-1">
+          <div
+            aria-hidden="true"
+            className="relative flex h-16 w-full items-center justify-center rounded-lg bg-card p-2 opacity-50 shadow-[inset_0_0_0_1px_var(--color-border)]"
+          >
+            <BankPlate bank={b} muted />
+          </div>
+          <span className="flex flex-col items-center gap-1">
+            <span className="text-[11px] leading-none text-muted-foreground">
+              {BANK_BRAND[b]?.name ?? b}
+            </span>
+            <Badge tone={badgeTone} className="px-1.5 text-[10px] tracking-normal">
+              {badge}
+            </Badge>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 interface PaymentMethodSelectorProps {
   channels: MintChannelOption[];
-  totalBeforePgFeeIdr: string;
   isPaying: boolean;
   payError: string | null;
   onPay: (channel: PaymentChannel, bank: VaBank | null) => void;
   onCancel: () => void;
-  /** Kurs yang benar-benar dipakai menghitung `subtotalIdr` — lihat catatan di `FeeTable`. */
-  effectiveRate?: string;
-  subtotalIdr?: string;
-  mintFeePct?: string;
-  mintFeeIdr?: string;
-  /** Sisa waktu memilih metode, sudah terformat. Tampil di baris "Kurs terkunci". */
+  /** Harga ORDER — hanya untuk backend sebelum D25 (null di D25 selama REQUESTED). */
+  totalBeforePgFeeIdr?: string | null;
+  effectiveRate?: string | null;
+  subtotalIdr?: string | null;
+  mintFeeIdr?: string | null;
+  /** Persen biaya mint (global, `fee_configs.mint_fee_pct`). Label saja. */
+  mintFeePct?: string | null;
+  /** Sisa waktu memilih metode, sudah terformat. */
   countdown?: React.ReactNode;
 }
 
 export function PaymentMethodSelector({
-  channels,
-  totalBeforePgFeeIdr,
+  channels: channelsRaw,
   isPaying,
   payError,
   onPay,
   onCancel,
+  totalBeforePgFeeIdr,
   effectiveRate,
   subtotalIdr,
-  mintFeePct,
   mintFeeIdr,
+  mintFeePct,
   countdown,
 }: PaymentMethodSelectorProps) {
-  // TIDAK ADA yang dipilih sebelum orangnya memilih — persis Figma A1a (`2639:31807`:
-  // "default (belum dipilih, tidak dipra-pilih)"), di dua lapisnya sekaligus.
-  //
-  // Sebelumnya di sini ada aturan F6 "metode/bank tunggal dipilih dari awal". Aturan itu
-  // dicabut, karena premisnya sudah tidak ada dan akibatnya nyata:
-  //  1. Premis "cuma satu pilihan". Backend dev memang mengirim satu channel, tapi layar ini
-  //     selalu punya DUA kartu — kartu kedua "Transfer bank BNI" digambar permanen. Jadi
-  //     `channels.length === 1` tidak lagi berarti "tidak ada yang bisa dipilih".
-  //  2. Akibatnya. Dengan satu channel, layar terbuka dengan Virtual Account sudah tercentang
-  //     dan langkah "pilih metode" terlewat sama sekali — layar A1a tidak pernah terlihat.
-  //     Yang tersisa cuma tulisan "Pilih bank dulu untuk lanjut" di bawah kartu yang entah
-  //     kenapa sudah menyala.
-  //  3. Bank pun tidak lagi dipra-pilih walau cuma satu: ini rekening tujuan uang. Kalau
-  //     tombol bayar hidup tanpa satu ketukan pun, tidak ada momen di mana orangnya
-  //     menyatakan "ya, ke bank ini".
+  // Urutan = urutan backend (sortOrder admin). Channel yang tak dikenal dibuang, tidak disusun.
+  const channels = channelsRaw.filter((c) => KNOWN_CHANNELS.has(c.channel));
+  const legacy: LegacyOrderPrice = { totalBeforePgFeeIdr, subtotalIdr, mintFeeIdr, effectiveRate };
+  const cheapest = cheapestChannel(channels);
+
   const [channel, setChannel] = useState<PaymentChannel | null>(null);
   const [bank, setBank] = useState<VaBank | null>(null);
 
@@ -148,86 +298,167 @@ export function PaymentMethodSelector({
     setBank(null);
   }
 
-  const selected = channels.find((c) => c.channel === channel) ?? null;
+  // Direkonsiliasi tiap render: channel yang dipilih bisa hilang dari `channels[]` atau berubah
+  // `available=false` di muatan berikutnya (admin mematikan metode, kurs BNI dikosongkan).
+  const selectedOption =
+    channels.find((c) => c.channel === channel && isAvailable(c)) ?? null;
+  const selectedChannel = selectedOption?.channel ?? null;
 
-  // Dua daftar, dua nasib (USDX-622). `banks` bisa dipilih; `disabledBanks` cuma ditampilkan.
-  // Diurutkan lewat sortVaBanks yang sama supaya bank tidak berpindah tempat antar poll GET —
-  // alasan urutan itu dipatok di FE sejak awal.
-  //
-  // Yang mati MENANG atas yang hidup kalau backend mengirim bank yang sama di kedua daftar.
-  // Tanpa pengurangan ini, satu bank tampil dua kali dengan dua nasib di layar yang sama, dan
-  // yang menang adalah salinan yang bisa diklik — persis bank yang kita tahu akan gagal di
-  // `create-va`. Menolak sesuatu yang mestinya boleh cuma merepotkan; menerima sesuatu yang
-  // mestinya ditolak memakan uang orang.
-  const comingSoonBanks = sortVaBanks(selected?.disabledBanks ?? []);
+  // Bank: `banks` (urutan backend) dikurangi yang mati. Yang mati MENANG kalau backend mengirim
+  // bank yang sama di dua daftar — menerima bank yang pasti ditolak lebih mahal daripada menolak
+  // yang boleh. Bank yang `bankOptions[].available=false` (rev-17) tampil dengan alasannya.
+  const comingSoonBanks = selectedOption?.disabledBanks ?? [];
   const comingSoonSet = new Set<VaBank>(comingSoonBanks);
-  const activeBanks = sortVaBanks(selected?.banks ?? []).filter((b) => !comingSoonSet.has(b));
-
-  // Pilihan bank direkonsiliasi tiap render, bukan cuma di-reset saat metode berganti.
-  // `channels[]` datang dari GET yang bisa dimuat ulang: bank yang tadi hidup bisa berpindah ke
-  // `disabledBanks` sesudah user memilihnya. Ubinnya lenyap dari layar tapi `bank` tetap
-  // memegangnya, tombol bayar tetap hidup, dan `onPay` mengirim bank yang sudah mati tanpa
-  // seorang pun melihatnya.
+  const bankOptionOf = (b: VaBank) =>
+    selectedOption?.bankOptions?.find((o) => o.bank === b) ?? null;
+  const listedBanks = (selectedOption?.banks ?? []).filter((b) => !comingSoonSet.has(b));
+  const activeBanks = listedBanks.filter((b) => {
+    const o = bankOptionOf(b);
+    return o === null || isAvailable(o);
+  });
+  const unavailableBanks = listedBanks.filter((b) => !activeBanks.includes(b));
   const effectiveBank = bank !== null && activeBanks.includes(bank) ? bank : null;
 
-  // VA yang tak menyisakan satu bank pun yang bisa dipilih bukan "belum memilih" — tak ada yang
-  // bisa dipilih. Menyuruh orang "Pilih bank dulu untuk lanjut" di layar tanpa satu pun bank
-  // adalah perintah yang mustahil dituruti.
-  const noBankSelectable = channel === "VA" && activeBanks.length === 0;
-  const needsBank = channel === "VA" && effectiveBank === null;
-  const canPay = channel !== null && !needsBank && !isPaying;
+  const isVa = selectedChannel === "VA";
+  const noBankSelectable = isVa && activeBanks.length === 0;
+  const needsBank = isVa && effectiveBank === null;
+  const canPay = selectedOption !== null && !needsBank && !isPaying;
+  const nothingSelectable = channels.every((c) => !isAvailable(c));
 
-  // Temuan D4: angka yang benar-benar harus dibayar dulu baru muncul SETELAH kartu metode
-  // diklik — di halaman pembayaran, itu terlambat. Total dihitung sejak awal dari `channels[]`,
-  // yang memang sudah membawa `pgFeeIdr` per metode (USDX-216).
-  //
-  // Kalau biaya antar-metode BERBEDA, totalnya belum satu angka — dan mengarang satu angka
-  // (mis. memakai yang termurah tanpa bilang) menyesatkan tepat di tempat yang mahal. Jadi yang
-  // ditampilkan rentangnya, dengan catatan bahwa pilihan metode yang menentukan.
-  const base = Number(totalBeforePgFeeIdr);
-  const selectedFee = selected ? feeOf(selected) : null;
-  const knownFees = channels.map(feeOf).filter((f): f is number => f !== null);
-  const allFeesKnown = knownFees.length === channels.length && knownFees.length > 0;
-  const feeMin = allFeesKnown ? Math.min(...knownFees) : null;
-  const feeMax = allFeesKnown ? Math.max(...knownFees) : null;
-  const fixedFee = selectedFee ?? (feeMin !== null && feeMin === feeMax ? feeMin : null);
-  const grandTotal = fixedFee != null && Number.isFinite(base) ? base + fixedFee : null;
-  const totalRange =
-    grandTotal == null && feeMin !== null && feeMax !== null && Number.isFinite(base)
-      ? { min: base + feeMin, max: base + feeMax }
-      : null;
+  const selectedPrice = selectedOption
+    ? priceOf(selectedOption, legacy, effectiveBank ? bankOptionOf(effectiveBank) : null)
+    : null;
 
-  // Rincian penuh hanya bisa digambar kalau ketiga angka penyusunnya ada. Backend lama yang
-  // tidak mengirimnya jatuh ke tabel satu baris (total saja) — lebih baik kurang baris daripada
-  // baris yang isinya tebakan.
-  const subtotal = Number(subtotalIdr);
-  const mintFee = Number(mintFeeIdr);
-  const rate = Number(effectiveRate);
-  // `>= 0`, BUKAN `> 0`. Biaya mint nol adalah nilai yang SAH — artinya gratis, bukan
-  // artinya datanya belum ada. Dengan `> 0`, backend dev yang mengirim `mintFeePct: 0`
-  // membuat SELURUH tabel rincian hilang: kurs terkunci beserta hitung mundurnya, nilai
-  // USDX, biaya, semuanya — dan yang tersisa di layar tempat orang memutuskan membayar
-  // cuma satu angka "Total bayar" tanpa penjelasan. Yang menentukan tabel ini layak
-  // tampil adalah angkanya ADA dan masuk akal, bukan angkanya kebetulan positif.
-  const hasBreakdown = [subtotal, mintFee].every((n) => Number.isFinite(n) && n >= 0) && subtotal > 0;
+  const payLabel =
+    selectedPrice === null
+      ? CHECKOUT_COPY.pickMethodCta
+      : selectedPrice.total !== null
+        ? CHECKOUT_COPY.payAmountCta(formatIDR(selectedPrice.total))
+        : CHECKOUT_COPY.payCta;
 
-  // Figma menghapus biaya layanan dari kartu metode karena di desain cuma ada satu metode
-  // hidup — perbandingannya tak pernah terjadi. Di produksi `channels[]` membawa VA dan QRIS
-  // dengan selisih yang bisa 7×, jadi barisnya menampilkan RENTANG selama belum ada yang
-  // dipilih, lalu mengunci ke angka metode terpilih. Bentuk Figma tetap, angkanya tidak hilang.
-  const feeValue =
-    selectedFee != null
-      ? formatIDR(selectedFee)
-      : feeMin != null && feeMax != null
-        ? feeMin === feeMax
-          ? formatIDR(feeMin)
-          : `${formatIDR(feeMin)} – ${formatIDR(feeMax)}`
-        : "—";
-  const feeLabelText = selected
-    ? `${CHECKOUT_COPY.serviceFeeLabel} (${selected.channel === "VA" ? "Virtual Account" : "QRIS"})`
-    : CHECKOUT_COPY.serviceFeeLabel;
+  function detail(option: MintChannelOption) {
+    const ch = option.channel;
+    const p = priceOf(option, legacy, effectiveBank ? bankOptionOf(effectiveBank) : null);
+    const hasBreakdown = p.subtotal !== null && p.mintFee !== null;
+    const rateUpdatedAt = formatWibDateTime(option.rateUpdatedAt);
+    const feeVaries = bankFeesVary(option) && effectiveBank === null;
+    return (
+      <div
+        data-testid={`detail-${ch}`}
+        className="flex flex-col gap-3 rounded-lg bg-muted p-3 min-[544px]:p-4"
+      >
+        {ch === "BANK_TRANSFER" && p.rate !== null && (
+          <div className="flex flex-col gap-0.5 text-sm text-foreground">
+            <p>{CHECKOUT_COPY.bniRateLine(formatRate(p.rate))}</p>
+            {rateUpdatedAt && (
+              <p className="text-xs text-muted-foreground">
+                {CHECKOUT_COPY.rateUpdatedAt(rateUpdatedAt)}
+              </p>
+            )}
+          </div>
+        )}
 
-  const showTotal = grandTotal != null || totalRange != null;
+        {ch === "QRIS" && <p className="text-sm text-foreground">{CHECKOUT_COPY.qrisDescription}</p>}
+
+        {/* Grup radio bank tinggal DI DALAM grup metode. Aman karena `ui/radio-group` hanya
+            menggerakkan radio miliknya sendiri saat tombol panah ditekan. */}
+        {ch === "VA" &&
+          (activeBanks.length > 0 || comingSoonBanks.length > 0 || unavailableBanks.length > 0) && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {noBankSelectable ? CHECKOUT_COPY.noBankAvailableLabel : CHECKOUT_COPY.chooseBankLabel}
+              </p>
+              {activeBanks.length > 0 && (
+                <RadioGroup
+                  value={effectiveBank ?? ""}
+                  onValueChange={(v) => setBank(v as VaBank)}
+                  aria-label={CHECKOUT_COPY.chooseBankLabel}
+                  className="grid-cols-3 gap-2"
+                >
+                  {activeBanks.map((b) => {
+                    const isSel = effectiveBank === b;
+                    const id = `bank-${b}`;
+                    return (
+                      <label
+                        key={b}
+                        htmlFor={id}
+                        className={cn(
+                          // Tepi = bayangan INSET, bukan `border`: border memakan tinggi dan
+                          // menyusutkan plat 48 px; bayangan tidak (8 + 48 + 8 = 64 persis).
+                          "relative flex h-16 cursor-pointer items-center justify-center rounded-lg bg-card p-2 transition-control",
+                          "has-[[data-slot=radio-group-item]:focus-visible]:ring-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-focus-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-background",
+                          isSel
+                            ? "bg-primary-text/5 shadow-[inset_0_0_0_2px_var(--color-primary-text)]"
+                            : "shadow-[inset_0_0_0_1px_var(--color-border)] hover:shadow-[inset_0_0_0_1px_var(--color-primary-text)]",
+                        )}
+                      >
+                        {/* Pembungkus `sr-only`: radio 20 px keluar dari alur, logo tetap di tengah. */}
+                        <span className="sr-only">
+                          <RadioGroupItem value={b} id={id} aria-label={BANK_BRAND[b]?.name ?? b} />
+                        </span>
+                        <BankPlate bank={b} />
+                      </label>
+                    );
+                  })}
+                </RadioGroup>
+              )}
+              <DeadBankList
+                banks={unavailableBanks}
+                label={CHECKOUT_COPY.unavailableBadge}
+                badge={CHECKOUT_COPY.unavailableBadge}
+                badgeTone="neutral"
+              />
+              {unavailableBanks.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {unavailableText(bankOptionOf(unavailableBanks[0]) ?? {})}
+                </p>
+              )}
+              <DeadBankList
+                banks={comingSoonBanks}
+                label={CHECKOUT_COPY.bankComingSoonListLabel}
+                badge={CHECKOUT_COPY.bankComingSoonLabel}
+                badgeTone="coming-soon"
+              />
+            </div>
+          )}
+
+        {hasBreakdown && (
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            {ch !== "BANK_TRANSFER" && p.rate !== null && (
+              <FeeRow label={CHECKOUT_COPY.rateLabel} value={CHECKOUT_COPY.perUsdx(formatRate(p.rate))} />
+            )}
+            <FeeRow label={CHECKOUT_COPY.usdxValueLabel} value={formatIDR(p.subtotal!)} />
+            <FeeRow
+              label={
+                mintFeePct
+                  ? `${CHECKOUT_COPY.mintFeeLabel} (${mintFeePct}%)`
+                  : CHECKOUT_COPY.mintFeeLabel
+              }
+              value={formatIDR(p.mintFee!)}
+            />
+            <FeeRow
+              label={CHECKOUT_COPY.serviceFeeLabel}
+              value={
+                p.pgFee === null ? "—" : feeVaries ? `mulai ${formatIDR(p.pgFee)}` : formatIDR(p.pgFee)
+              }
+            />
+            {p.total !== null && (
+              <FeeRow
+                label={TOTAL_LABEL}
+                value={feeVaries ? `mulai ${formatIDR(p.total)}` : formatIDR(p.total)}
+                strong
+              />
+            )}
+            {ch === "BANK_TRANSFER" && (
+              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.uniqueCodeEstimateNote}</p>
+            )}
+            {/* `channels[]` hanya estimasi: `/pay` membaca ulang kurs lalu mengunci (D25-d). */}
+            <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.estimateNote}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -235,241 +466,62 @@ export function PaymentMethodSelector({
         <p className="text-sm font-medium text-foreground">{CHECKOUT_COPY.methodGroupLabel}</p>
 
         <RadioGroup
-          value={channel ?? ""}
+          value={selectedChannel ?? ""}
           onValueChange={(v) => pickChannel(v as PaymentChannel)}
-          aria-label="Metode pembayaran"
+          aria-label={CHECKOUT_COPY.methodGroupLabel}
           className="gap-2"
         >
-          {channels.map((opt) => (
-            <CardChoice
-              key={opt.channel}
-              value={opt.channel}
-              id={`metode-${opt.channel}`}
-              title={opt.channel === "VA" ? "Virtual Account" : "QRIS"}
-              description={channelDescription(opt)}
-              icon={channelIcon(opt.channel)}
-            />
-          ))}
-
-          {/* Kartu kedua Figma A1a/A1b (`2639:31820`), tanpa keterangan — badge-nya sudah
-              menjelaskan. Sengaja TIDAK berasal dari `channels[]`: transfer bank langsung
-              belum ada di backend, jadi tidak akan pernah muncul di sana, dan justru itu
-              yang diberitahukan kartunya. Menyembunyikannya sampai backend siap berarti
-              orang tetap bertanya-tanya apakah bisa transfer manual — pertanyaan yang
-              sekarang dijawab di tempat pertanyaannya muncul.
-
-              Mati beneran, bukan cuma pudar: `disabled` diteruskan ke `RadioGroupItem`, jadi
-              Radix menandainya `data-disabled`, melepasnya dari roving focus, dan
-              `RadioGroup` di repo ini menyaring `:not([disabled])` saat panah ditekan.
-              Namanya untuk pembaca layar tetap lengkap — "Transfer bank BNI, Segera hadir" —
-              karena teks badge ikut terbaca sebagai bagian dari label. */}
-          <CardChoice
-            value="TRANSFER_MANUAL"
-            id="metode-transfer-manual"
-            title={CHECKOUT_COPY.directTransferTitle}
-            badge={CHECKOUT_COPY.comingSoonBadge}
-            disabled
-          />
+          {channels.map((opt) => {
+            const ch = opt.channel;
+            const available = isAvailable(opt);
+            const total = priceOf(opt, legacy).total;
+            const isOpen = selectedChannel === ch;
+            return (
+              <div key={ch} className="flex flex-col gap-2">
+                <CardChoice
+                  value={ch}
+                  id={`metode-${ch}`}
+                  title={channelTitle(ch)}
+                  // Opsi aktif yang tidak bisa dipakai UNTUK ORDER INI tampil non-aktif beserta
+                  // alasannya (rev-17) — disembunyikan, orang mengira metodenya tidak ada.
+                  description={available ? undefined : unavailableText(opt)}
+                  disabled={!available}
+                  icon={channelIcon(ch)}
+                  trailing={
+                    <span className="flex flex-col items-end gap-1">
+                      <span className="text-sm font-semibold whitespace-nowrap text-foreground tabular-nums">
+                        {!available
+                          ? CHECKOUT_COPY.unavailableBadge
+                          : total === null
+                            ? "—"
+                            : bankFeesVary(opt)
+                              ? `mulai ${formatIDR(total)}`
+                              : formatIDR(total)}
+                      </span>
+                      {cheapest === ch && (
+                        <Badge tone="success">{CHECKOUT_COPY.cheapestBadge}</Badge>
+                      )}
+                    </span>
+                  }
+                />
+                {isOpen && detail(opt)}
+              </div>
+            );
+          })}
         </RadioGroup>
 
-        {/* Grup kedua, bukan grup bersarang. Ubinnya seperti desain (logo di atas plat putih,
-            tepi brand + wash saat terpilih); radionya sendiri disembunyikan secara visual, dan
-            yang membawa cincin fokus adalah ubinnya lewat `has-[...]`. Tanpa itu, fokus
-            keyboard mendarat di lingkaran yang tak terlihat. */}
-        {selected?.channel === "VA" && (activeBanks.length > 0 || comingSoonBanks.length > 0) && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              {noBankSelectable ? CHECKOUT_COPY.noBankAvailableLabel : CHECKOUT_COPY.chooseBankLabel}
-            </p>
-            {/* Radiogroup tanpa satu pun opsi tetap diumumkan pembaca layar sebagai grup yang
-                bisa dipilih. Kalau tak ada yang bisa dipilih, grupnya tidak dirender sama
-                sekali — yang tersisa cuma daftar "segera hadir" di bawahnya, yang memang
-                menjelaskan keadaannya. */}
-            {activeBanks.length > 0 && (
-            <RadioGroup
-              value={effectiveBank ?? ""}
-              onValueChange={(v) => setBank(v as VaBank)}
-              aria-label={CHECKOUT_COPY.chooseBankLabel}
-              className="grid-cols-3 gap-2"
-            >
-              {activeBanks.map((b) => {
-                const brand = BANK_BRAND[b];
-                const isSel = effectiveBank === b;
-                const id = `bank-${b}`;
-                return (
-                  <label
-                    key={b}
-                    htmlFor={id}
-                    className={cn(
-                      // Ubin 64 · plat inset 8 · plat 48 (Figma `2639:32218`/`2639:32219`).
-                      //
-                      // Tepinya digambar sebagai bayangan INSET, bukan `border`. Border ikut
-                      // menghitung tinggi: 64 − 8 − 8 − 1 − 1 menyisakan 46 untuk plat yang
-                      // seharusnya 48, dan plat itu — flex item tanpa `shrink-0` — lalu
-                      // menyusut mengikuti logonya (terukur 27,98 px) alih-alih melebihi
-                      // kotaknya. Bayangan tidak memakan ruang, jadi 8 + 48 + 8 = 64 persis,
-                      // dan tebalnya boleh berubah 1 → 2 saat terpilih tanpa menggeser apa pun.
-                      "relative flex h-16 cursor-pointer items-center justify-center rounded-lg bg-card p-2 transition-control",
-                      "has-[[data-slot=radio-group-item]:focus-visible]:ring-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-focus-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-2 has-[[data-slot=radio-group-item]:focus-visible]:ring-offset-background",
-                      isSel
-                        // `primary-text`, bukan `primary`: maroon #800000 di atas kartu gelap
-                        // #1a1a1a cuma 1,59:1 (SC 1.4.11 minta 3:1), dan radio ubin bank
-                        // tersembunyi sehingga tepi + wash ini satu-satunya penanda bank
-                        // terpilih. Wash 5 % mengikuti `Card/Pilihan` supaya dua lapis pilihan
-                        // di layar yang sama memakai bahasa "terpilih" yang sama.
-                        ? "bg-primary-text/5 shadow-[inset_0_0_0_2px_var(--color-primary-text)]"
-                        : "shadow-[inset_0_0_0_1px_var(--color-border)] hover:shadow-[inset_0_0_0_1px_var(--color-primary-text)]",
-                    )}
-                  >
-                    {/* Pembungkus `sr-only`, bukan `className="sr-only"` di itemnya.
-                        `RadioGroupItem` membawa `relative size-5` di kelas dasarnya, dan
-                        `sr-only` tidak menang atas keduanya (tailwind-merge menganggapnya grup
-                        lain, lalu urutan CSS yang memutuskan). Akibatnya radio 20 px itu tetap
-                        ikut tata letak dan mendorong logo 11 px ke bawah dari pusat ubin —
-                        persis "logo nggak pas tengah kotak". Span pembungkus tak punya kelas
-                        yang bertabrakan, jadi ia benar-benar keluar dari alur. */}
-                    <span className="sr-only">
-                      <RadioGroupItem value={b} id={id} aria-label={brand?.name ?? b} />
-                    </span>
-                    {brand?.logo ? (
-                      <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={brand.logo!}
-                          alt={brand?.name ?? b}
-                          // 24 px, tinggi logo di Figma (`2639:32220`), di tengah plat 48.
-                          className="max-h-6 w-auto max-w-full object-contain"
-                        />
-                      </span>
-                    ) : (
-                      <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
-                        <span
-                          className="text-sm font-extrabold tracking-tight"
-                          style={{ color: brand?.bg }}
-                        >
-                          {brand?.mark ?? b}
-                        </span>
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
-            </RadioGroup>
-            )}
-
-            {/* Bank yang belum diaktifkan penyedia (USDX-622). Ditampilkan, bukan disembunyikan:
-                disembunyikan, pemegang rekening BNI/Mandiri/BRI mengira banknya tidak dilayani
-                dan pergi — padahal Nobu open-loop dan bisa dibayar dari bank mana pun, dan
-                ketiganya sedang dalam proses aktivasi.
-
-                Grid terpisah, bukan ubin mati di dalam RadioGroup: radio yang tak bisa dipilih
-                tetap ikut urutan panah keyboard dan tetap dibacakan sebagai pilihan. Sebagai
-                daftar biasa, ia terbaca apa adanya — keterangan, bukan pilihan. */}
-            {comingSoonBanks.length > 0 && (
-              <ul className="grid grid-cols-3 gap-2" aria-label={CHECKOUT_COPY.bankComingSoonListLabel}>
-                {comingSoonBanks.map((b) => {
-                  const brand = BANK_BRAND[b];
-                  return (
-                    <li key={b} className="flex flex-col items-center gap-1">
-                      <div
-                        aria-hidden="true"
-                        className="relative flex h-16 w-full items-center justify-center rounded-lg bg-card p-2 opacity-50 shadow-[inset_0_0_0_1px_var(--color-border)]"
-                      >
-                        <span className="flex h-12 w-full shrink-0 items-center justify-center rounded-md bg-white px-2">
-                          {brand?.logo ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
-                              src={brand.logo}
-                              alt=""
-                              className="max-h-6 w-auto max-w-full object-contain grayscale"
-                            />
-                          ) : (
-                            <span
-                              className="text-sm font-extrabold tracking-tight"
-                              style={{ color: brand?.bg }}
-                            >
-                              {brand?.mark ?? b}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      {/* Nama banknya ikut dibacakan di sini, bukan cuma di gambar yang
-                          `aria-hidden`, supaya pembaca layar tetap tahu bank apa yang belum ada.
-                          Badge `coming-soon` yang sama dengan tombol Bridge/Send — satu bunyi
-                          untuk "belum sekarang, tapi akan ada" di seluruh produk. */}
-                      <span className="flex flex-col items-center gap-1">
-                        <span className="text-[11px] leading-none text-muted-foreground">
-                          {brand?.name ?? b}
-                        </span>
-                        <Badge tone="coming-soon">{CHECKOUT_COPY.bankComingSoonLabel}</Badge>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+        {nothingSelectable && (
+          <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.noMethodAvailable}</p>
         )}
       </div>
 
-      {/* Tabel rincian — selalu terbuka, tepat di atas tombol (Figma `2639:32255`). */}
-      {(showTotal || hasBreakdown) && (
-        <div className="flex flex-col gap-2">
-          {hasBreakdown && Number.isFinite(rate) && rate > 0 && (
-            // "Kurs terkunci" memakai `effectiveRate` (kurs dasar + spread), BUKAN `baseRate`:
-            // itu angka yang benar-benar dipakai menghitung `subtotalIdr`. Countdown menempel di
-            // sini karena inilah yang sebenarnya kedaluwarsa sebelum metode dipilih — kursnya.
-            <FeeRow
-              label={CHECKOUT_COPY.lockedRateLabel}
-              value={
-                <>
-                  <span>{CHECKOUT_COPY.perUsdx(formatIDR(rate))}</span>
-                  {countdown && (
-                    <>
-                      <Lock aria-hidden className="size-3.5 text-muted-foreground" />
-                      {/* Figma tidak menuliskan label tenggatnya di sini — baris "Kurs terkunci"
-                          sudah menyatakan apa yang habis. Tapi angka telanjang di samping ikon
-                          gembok tidak terbaca pembaca layar sebagai tenggat apa pun, dan temuan
-                          F2 lahir justru dari countdown yang tak jelas menghitung apa. Jadi
-                          labelnya ada, cuma tidak memakan ruang. */}
-                      <span className="sr-only">{CHECKOUT_COPY.countdownBeforeMethod}</span>
-                      <span className="font-semibold tabular-nums">{countdown}</span>
-                    </>
-                  )}
-                </>
-              }
-            />
-          )}
-          {hasBreakdown && (
-            <>
-              <FeeRow label={CHECKOUT_COPY.usdxValueLabel} value={formatIDR(subtotal)} />
-              <FeeRow
-                label={
-                  mintFeePct
-                    ? `${CHECKOUT_COPY.mintFeeLabel} (${mintFeePct}%)`
-                    : CHECKOUT_COPY.mintFeeLabel
-                }
-                value={formatIDR(mintFee)}
-              />
-              <FeeRow label={feeLabelText} value={feeValue} />
-            </>
-          )}
-          {showTotal && (
-            <FeeRow
-              label={TOTAL_LABEL}
-              strong
-              value={
-                grandTotal != null
-                  ? formatIDR(grandTotal)
-                  : `${formatIDR(totalRange!.min)} – ${formatIDR(totalRange!.max)}`
-              }
-            />
-          )}
-          {showTotal && grandTotal == null && (
-            <p className="text-xs text-muted-foreground">
-              {CHECKOUT_COPY.totalDependsOnMethodNote}
-            </p>
-          )}
+      {countdown && (
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <span className="text-muted-foreground">{CHECKOUT_COPY.countdownBeforeMethod}</span>
+          <span className="flex items-center gap-1.5 text-foreground">
+            <Lock aria-hidden className="size-3.5 text-muted-foreground" />
+            <span className="font-semibold tabular-nums">{countdown}</span>
+          </span>
         </div>
       )}
 
@@ -479,46 +531,43 @@ export function PaymentMethodSelector({
         </p>
       )}
 
-      {/* gap 16, bukan 8: Figma menaruh baris tombol (`2639:31852`, berakhir di y 581) dan teks
-          bantunya (`2639:31862`, y 597) pada irama 16 yang sama dengan seluruh isi kartu. */}
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-3">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col-reverse gap-3 min-[400px]:flex-row">
           <Button
             type="button"
             variant="outline"
             size="lg"
-            className="flex-1"
+            className="min-[400px]:flex-1"
             onClick={onCancel}
             disabled={isPaying}
           >
             Batal
           </Button>
-          {/* `loading` milik `ui/button` menahan lebar tombol saat labelnya berganti — tombol
-              footer yang menyusut di tengah submit terbaca sebagai bug tata letak. */}
           <Button
             type="button"
             variant="brand"
             size="lg"
-            className="flex-1"
+            className="min-[400px]:flex-[2]"
             disabled={!canPay}
             loading={isPaying}
             loadingLabel="Memproses…"
-            onClick={() => channel && onPay(channel, effectiveBank)}
+            // Transfer BNI: `bank` WAJIB `BNI` (`api/mint.yaml` PayMintOrderRequest, D25).
+            // QRIS: tanpa bank. VA: bank yang dipilih.
+            onClick={() =>
+              selectedChannel &&
+              onPay(
+                selectedChannel,
+                selectedChannel === "BANK_TRANSFER" ? "BNI" : selectedChannel === "VA" ? effectiveBank : null,
+              )
+            }
           >
-            {CHECKOUT_COPY.payCta}
+            {payLabel}
           </Button>
         </div>
 
-        {/* Di BAWAH tombol, rata tengah (Figma `2639:31862`). Di atas tombol dan rata kiri, ia
-            terbaca sebagai keterangan tabel biaya di atasnya, bukan sebagai alasan tombol yang
-            di bawahnya mati. */}
-        {(needsBank || channel === null) && (
+        {needsBank && (
           <p className="text-center text-xs text-muted-foreground">
-            {noBankSelectable
-              ? CHECKOUT_COPY.noBankAvailableHint
-              : needsBank
-                ? CHECKOUT_COPY.pickBankHint
-                : CHECKOUT_COPY.pickMethodHint}
+            {noBankSelectable ? CHECKOUT_COPY.noBankAvailableHint : CHECKOUT_COPY.pickBankHint}
           </p>
         )}
       </div>

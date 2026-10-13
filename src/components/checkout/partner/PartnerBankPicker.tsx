@@ -30,7 +30,8 @@ import { PartnerBrandButton, PartnerCard, PartnerCountdown } from "./PartnerUi";
 
 interface PartnerBankPickerProps {
   channels: MintChannelOption[];
-  totalBeforePgFeeIdr: string;
+  /** Tipenya nullable karena dipakai bersama jalur konsumen (D25); partner API tetap mengirimnya. */
+  totalBeforePgFeeIdr: string | null;
   copy: PartnerCopy;
   secondsLeft: number;
   isPaying: boolean;
@@ -64,7 +65,8 @@ export function PartnerBankPicker({
 
   const pgFee =
     va && va.pgFeeIdr && Number.isFinite(Number(va.pgFeeIdr)) ? Number(va.pgFeeIdr) : null;
-  const base = Number(totalBeforePgFeeIdr);
+  // `Number(null)` = 0 — akan terbaca sebagai total Rp 0 + biaya. Null = belum diketahui.
+  const base = totalBeforePgFeeIdr == null ? NaN : Number(totalBeforePgFeeIdr);
   const total = pgFee !== null && Number.isFinite(base) ? base + pgFee : null;
 
   return (

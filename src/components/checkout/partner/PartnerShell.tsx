@@ -158,17 +158,12 @@ function PartnerMark({ branding }: { branding: PartnerBranding | null }) {
 }
 
 /**
- * Wordmark USDX di top bar presentasi brand.
+ * Lockup USDX di top bar presentasi brand.
  *
  * Desain memakai instance `asset/usdx-lockup` yang bersumber dari `logo-lockup.png` di usdx.co.id.
- * Berkas itu TIDAK ada di repo ini (`public/image/` hanya memuat logo bank), jadi di sini ia
- * dirender sebagai wordmark teks. Menggambar ulang lambang merek sendiri bukan pilihan — logo
- * yang mirip-mirip lebih buruk daripada wordmark yang jujur. Lihat § Known Drift di PR.
+ * Berkasnya disalin persis dari landing ke `public/image/` — jangan digambar ulang.
  */
 function UsdxLockup() {
-  return (
-    <span className="ml-auto shrink-0 text-base font-extrabold tracking-tight text-foreground">
-      USDX
-    </span>
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src="/image/logo-lockup.png" alt="USDX" className="ml-auto h-6 w-auto shrink-0" />;
 }

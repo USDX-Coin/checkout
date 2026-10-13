@@ -61,7 +61,14 @@ function payErrorMessage(error: unknown): string | null {
   if (isApiError(error)) {
     if (error.code === "INVALID_ORDER_STATE")
       return "Pesanan tidak lagi bisa memilih metode. Tunggu kedaluwarsa, lalu mulai ulang dari /mint.";
-    if (isValidationError(error)) return "Data pembayaran tidak valid. Periksa pilihan metode.";
+    // D25/rev-16/17: `/pay` menghitung ulang dengan kurs + biaya terbaru dan bisa menolak metode
+    // yang barusan dimatikan admin, total di atas batas metode, atau aturan Rupiah lain — order
+    // TETAP `REQUESTED`, jadi nasabah boleh memilih metode lain (daftar dimuat ulang di bawah).
+    if (isValidationError(error))
+      return "Metode ini tidak bisa dipakai untuk pesanan ini sekarang. Daftar metode sudah diperbarui — pilih lagi.";
+    // Rev-17 R1/R2: tak ada kode unik Transfer BNI yang bebas untuk nominal ini.
+    if (error.code === "UNIQUE_CODE_EXHAUSTED")
+      return "Transfer BNI sedang penuh untuk nominal ini. Pilih Virtual Account atau coba lagi nanti.";
     if (error.code === "MINT_DISABLED") return "Mint belum dibuka di environment ini.";
   }
   return "Gagal memproses pembayaran. Silakan coba lagi.";
@@ -219,6 +226,15 @@ export function useCheckout(id: string) {
     mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) => payMintOrder(id, vars),
     onSuccess: (updated) => {
       queryClient.setQueryData(["mint-order", id], updated);
+    },
+    // Penolakan /pay yang membiarkan order `REQUESTED` (422 / 503) berarti `channels[]` yang
+    // sedang tampil sudah basi: muat ulang SEKALI supaya kartu yang tak lagi ditawarkan hilang atau
+    // tampil non-aktif, dan angka estimasinya ikut kurs terbaru. Polling tidak berjalan selama
+    // REQUESTED, jadi tanpa ini layar terus menawarkan pilihan yang barusan ditolak.
+    onError: (error) => {
+      if (isApiError(error) && (error.status === 422 || error.status === 503)) {
+        void queryClient.invalidateQueries({ queryKey: ["mint-order", id] });
+      }
     },
   });
 

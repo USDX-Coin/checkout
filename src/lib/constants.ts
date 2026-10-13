@@ -14,29 +14,10 @@ export const VA_BANKS = [
   "NOBU",
 ] as const;
 
-// Urutan TAMPIL bank di lapis "Pilih bank" dan di keterangan kartu Virtual Account.
-//
-// Backend mengirim `channels[].banks` tanpa janji urutan, dan halaman ini mem-poll GET
-// tiap beberapa detik: kalau urutan responsnya bergeser, ubin bank ikut bertukar tempat di
-// bawah jari orang yang sedang memilih rekening tujuan. Jadi urutannya ditentukan di sini,
-// mengikuti Figma A1b (`2639:32217`: Mandiri → BRI → BNI). Bank yang tidak disebut di daftar
-// ini tetap tampil, di belakang, dengan urutan apa adanya dari backend — daftar ini mengatur
-// prioritas, bukan menyaring.
-// NOBU di depan (USDX-622): per 7 Sep 2026 itu satu-satunya bank yang benar-benar bisa dipakai —
-// tiga sisanya menunggu aktivasi DurianPay dan tampil dalam keadaan mati. Yang bisa diklik pantas
-// dibaca lebih dulu.
-export const VA_BANK_ORDER = ["NOBU", "MANDIRI", "BRI", "BNI"] as const;
-
-export function sortVaBanks<T extends string>(banks: readonly T[]): T[] {
-  const rank = (b: T) => {
-    const i = (VA_BANK_ORDER as readonly string[]).indexOf(b);
-    return i === -1 ? VA_BANK_ORDER.length : i;
-  };
-  return banks
-    .map((b, i) => ({ b, i }))
-    .sort((x, y) => rank(x.b) - rank(y.b) || x.i - y.i)
-    .map((e) => e.b);
-}
+// Urutan tampil bank TIDAK ditentukan di sini lagi: sejak rev-16 (`sot/bni-integration.md`
+// §4.3.11) admin mengatur urutan metode dari back-office dan backend mengirim `channels[]` /
+// `banks` sudah urut `sortOrder`. Daftar urutan + `sortVaBanks` yang dulu ada di sini dicabut
+// bersama kartu statis "Transfer bank BNI" (USDX-764).
 
 // Brand per bank untuk pemilih metode (USDX-202). `logo` → SVG/PNG resmi di
 // public/image/banks/ di atas tile putih; `mark`/`bg`/`fg` fallback wordmark untuk bank
