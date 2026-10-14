@@ -839,15 +839,36 @@ describe("instruksi Transfer BNI (USD, USDX-749)", () => {
   });
 
   describe("positive", () => {
-    test("nominal USD tepat, rekening USD dari backend, kode unik sen, dan USDX yang diterima", () => {
+    test("'Ketik di wondr: USD 3.47', rekening USD dari backend, kode unik sen, dan USDX yang diterima", () => {
       renderWith(BNI_MENUNGGU);
-      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$3,47");
-      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik $0,47");
+      expect(screen.getByText("Ketik di wondr:")).toBeInTheDocument();
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent(/^USD 3\.47$/);
+      expect(screen.getByTestId("kode-unik")).toHaveTextContent(
+        "Sen tambahan ($0,47) adalah kode unik pembayaranmu dan ikut jadi USDX kamu.",
+      );
       expect(screen.getByText("Ke rekening USD BNI")).toBeInTheDocument();
       expect(screen.getByTestId("rekening-bni")).toHaveTextContent("2083 6709 28");
       expect(screen.getByTestId("nama-rekening-bni")).toHaveTextContent("a.n. PT Contoh Penampung");
-      expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent("Kamu akan menerima 3,47 USDX");
+      expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent(/^Kamu terima 3,47 USDX$/);
       expect(screen.getByText("Sisa waktu transfer")).toBeInTheDocument();
+    });
+
+    test("catatan kurs BNI di wondr dan syarat rekening atas nama sendiri", () => {
+      renderWith(BNI_MENUNGGU);
+      expect(screen.getByTestId("catatan-rupiah-bni")).toHaveTextContent(
+        "Rupiah yang terpotong mengikuti kurs BNI di aplikasi wondr.",
+      );
+      expect(screen.getByTestId("rekening-sendiri-bni")).toHaveTextContent(
+        "Transfer dari rekening atas nama kamu sendiri.",
+      );
+    });
+
+    test("salin nomor rekening menyalin nomor apa adanya (tanpa spasi)", () => {
+      const writeText = vi.fn();
+      Object.assign(navigator, { clipboard: { writeText } });
+      renderWith(BNI_MENUNGGU);
+      fireEvent.click(screen.getByRole("button", { name: "Salin nomor rekening USD BNI" }));
+      expect(writeText).toHaveBeenCalledWith("2083670928");
     });
 
     test("instruksi: transfer USD dari aplikasi wondr by BNI saja", () => {
@@ -887,6 +908,14 @@ describe("instruksi Transfer BNI (USD, USDX-749)", () => {
       expect(screen.queryByText(/Rp 55\.520/)).not.toBeInTheDocument();
       expect(screen.queryByText("Kurs terkunci")).not.toBeInTheDocument();
       expect(screen.queryByText(/Biaya mint/)).not.toBeInTheDocument();
+    });
+
+    test("panel instruksi tidak menyebut rupiah sama sekali (tanpa 'Rp', '≈', atau kurs)", () => {
+      renderWith(BNI_MENUNGGU);
+      const panel = screen.getByTestId("instruksi-transfer-bni");
+      expect(panel).not.toHaveTextContent(/Rp|≈|16\.000/);
+      // "sudah termasuk kode unik" diganti catatan sen tambahan — tidak dobel.
+      expect(panel).not.toHaveTextContent(/sudah termasuk kode unik/);
     });
 
     test("tidak ada BI-FAST / bank lain / teks Virtual Account, dan digit tidak disorot", () => {
@@ -929,20 +958,28 @@ describe("instruksi Transfer BNI (USD, USDX-749)", () => {
       for (const uniqueCode of ["00", "417"]) {
         const { unmount } = renderWith({ ...BNI_MENUNGGU, uniqueCode });
         expect(screen.queryByTestId("kode-unik")).not.toBeInTheDocument();
-        expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$3,47");
+        expect(screen.getByTestId("catatan-rupiah-bni")).toBeInTheDocument();
+        expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("USD 3.47");
         unmount();
       }
     });
 
     test("kode unik ber-nol depan ('07') → $0,07", () => {
       renderWith({ ...BNI_MENUNGGU, amount: "3.07", totalPayUsd: "3.07", uniqueCode: "07" });
-      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik $0,07");
+      expect(screen.getByTestId("kode-unik")).toHaveTextContent("Sen tambahan ($0,07)");
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("USD 3.07");
       expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent("3,07 USDX");
     });
 
-    test("nominal ribuan dolar tetap gaya id-ID", () => {
+    test("nominal ribuan dolar ditulis seperti diketik di wondr (titik desimal, tanpa pemisah ribuan)", () => {
       renderWith({ ...BNI_MENUNGGU, amount: "1234.56", totalPayUsd: "1234.56", uniqueCode: "56" });
-      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$1.234,56");
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent(/^USD 1234\.56$/);
+      expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent("1.234,56 USDX");
+    });
+
+    test("nominal bulat dari backend ('3.5') tetap dua desimal: USD 3.50", () => {
+      renderWith({ ...BNI_MENUNGGU, amount: "3.5", totalPayUsd: "3.5", uniqueCode: "50" });
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent(/^USD 3\.50$/);
     });
 
     test("sudah dibayar → hero menyebut USD yang diterima, bukan padanan rupiah", () => {
@@ -1015,7 +1052,9 @@ describe("instruksi Transfer BNI (USD, USDX-749)", () => {
         }),
       );
       expect(screen.getByRole("radio", { name: /Transfer BNI/ })).toBeEnabled();
-      expect(screen.getByText("$3,00")).toBeInTheDocument();
+      // Keputusan PM 14 Okt 2026: baris BNI dideskripsikan, tidak diberi harga.
+      expect(screen.queryByText("$3,00")).not.toBeInTheDocument();
+      expect(screen.getByText("Bayar USD lewat aplikasi wondr, kurs mengikuti BNI.")).toBeInTheDocument();
       expect(screen.queryByText("Transfer bank BNI")).not.toBeInTheDocument();
       expect(screen.queryByText("Segera hadir")).not.toBeInTheDocument();
     });

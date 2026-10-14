@@ -142,12 +142,14 @@ export const CHECKOUT_COPY = {
   cheapestBadge: "Paling hemat",
   pickMethodCta: "Pilih metode pembayaran",
   payAmountCta: (amount: string): string => `Bayar ${amount}`,
-  // Transfer BNI = transfer USD (keputusan PM 14 Okt 2026, USDX-749). Estimasinya BELUM memuat kode
-  // unik sen (maks. $0,99) — kode itu ikut di-mint, jadi USDX yang diterima = USD yang ditransfer.
-  bniUniqueCodeMaxNote: "ditambah kode unik maks. $0,99",
-  bniUsdMethodNote: "Transfer USD dari aplikasi wondr by BNI.",
-  uniqueCodeEstimateNote:
-    "Saat bayar ditambah kode unik (maks. $0,99) supaya transfer kamu dikenali. Kodenya ikut jadi USDX — kamu menerima USDX sebanyak USD yang kamu transfer.",
+  // Transfer BNI = transfer USD dari wondr (keputusan PM 14 Okt 2026, USDX-749). BNI mengonversi
+  // rupiah nasabah dengan kursnya sendiri yang TIDAK kita ketahui, jadi Transfer BNI tidak pernah
+  // menyebut angka rupiah. Sebelum /pay kode unik sen belum ada, jadi baris & detailnya juga tanpa
+  // nominal USD — angkanya baru muncul di halaman instruksi (USDX-749 tampilan).
+  bniMethodSubtitle: "Bayar USD lewat aplikasi wondr, kurs mengikuti BNI.",
+  bniDetailNote:
+    "Nominal transfer (termasuk kode unik sen yang ikut jadi USDX) muncul di langkah berikutnya.",
+  bniContinueCta: "Lanjut, lihat nominal transfer",
   // Opsi yang tampil tapi tidak bisa dipilih untuk order ini (rev-17, `unavailableReason`).
   unavailableBadge: "Tidak tersedia",
   unavailableAboveMax: (max: string | null): string =>
@@ -158,13 +160,19 @@ export const CHECKOUT_COPY = {
   noMethodAvailable: "Belum ada metode pembayaran yang bisa dipakai untuk pesanan ini.",
 
   // ── Instruksi Transfer BNI (desain PM 2 Okt 2026; USD sejak keputusan PM 14 Okt 2026) ──────
-  bniExactAmountLabel: "Transfer tepat",
+  // "Ketik di wondr: USD 3.54" — angkanya ditulis persis seperti yang diketik di kolom nominal wondr
+  // (titik desimal, tanpa simbol), sama dengan yang disalin tombol Salin.
+  bniTypeInWondrLabel: "Ketik di wondr:",
+  bniTypeInWondrAmount: (amount: string): string => `USD ${amount}`,
   // Kode unik ditulis sebagai keterangan, TANPA sorotan digit (week2.md § Checkout, D25).
-  bniIncludesUniqueCode: (amount: string): string => `sudah termasuk kode unik ${amount}`,
+  bniUniqueCodeNote: (amount: string): string =>
+    `Sen tambahan (${amount}) adalah kode unik pembayaranmu dan ikut jadi USDX kamu.`,
+  bniRupiahNote: "Rupiah yang terpotong mengikuti kurs BNI di aplikasi wondr.",
+  bniOwnAccountNote: "Transfer dari rekening atas nama kamu sendiri.",
   bniAccountLabel: "Ke rekening USD BNI",
   copyBniAccountAriaLabel: "Salin nomor rekening USD BNI",
   bniAccountName: (name: string): string => `a.n. ${name}`,
-  bniYouReceive: "Kamu akan menerima",
+  bniYouReceive: "Kamu terima",
   bniCountdownLabel: "Sisa waktu transfer",
   uniqueCodeLabel: "Kode unik",
   bniExactWarning: "Transfer persis sampai sen terakhir, dalam satu kali transfer.",
