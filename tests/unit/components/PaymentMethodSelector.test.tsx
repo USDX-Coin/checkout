@@ -93,7 +93,7 @@ function renderSelector(channels: MintChannelOption[], onPay = vi.fn()) {
 
 const card = (name: RegExp) => screen.getByRole("radio", { name });
 const payButton = () => screen.getByRole("button", { name: /Bayar|Pilih metode|Lanjut/ });
-const BNI_SUBTITLE = "Bayar USD lewat wondr · kurs mengikuti BNI di aplikasi wondr · tanpa biaya";
+const BNI_SUBTITLE = "Bayar USD lewat aplikasi wondr, kurs mengikuti BNI.";
 
 describe("daftar metode datang dari backend (rev-16)", () => {
   describe("positive", () => {
@@ -299,6 +299,12 @@ describe("Transfer BNI dipilih (USD, USDX-749 — keputusan PM 14 Okt 2026)", ()
       expect(within(detail).queryByText(/^Kurs/)).not.toBeInTheDocument();
       expect(within(detail).queryByText(/Diperbarui/)).not.toBeInTheDocument();
       expect(screen.queryByText("Rp 81.000")).not.toBeInTheDocument();
+    });
+
+    test("subjudul BNI satu kalimat polos: tanpa '·' dan tanpa 'tanpa biaya'", () => {
+      renderSelector([BNI, VA]);
+      const label = card(/Transfer BNI/).closest("label")!;
+      expect(label).not.toHaveTextContent(/·|tanpa biaya/);
     });
 
     test("tombol Transfer BNI tidak pernah 'Bayar $X' atau 'Bayar Rp X'", () => {

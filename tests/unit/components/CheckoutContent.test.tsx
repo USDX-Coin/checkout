@@ -1054,7 +1054,7 @@ describe("instruksi Transfer BNI (USD, USDX-749)", () => {
       expect(screen.getByRole("radio", { name: /Transfer BNI/ })).toBeEnabled();
       // Keputusan PM 14 Okt 2026: baris BNI dideskripsikan, tidak diberi harga.
       expect(screen.queryByText("$3,00")).not.toBeInTheDocument();
-      expect(screen.getByText(/kurs mengikuti BNI di aplikasi wondr/)).toBeInTheDocument();
+      expect(screen.getByText("Bayar USD lewat aplikasi wondr, kurs mengikuti BNI.")).toBeInTheDocument();
       expect(screen.queryByText("Transfer bank BNI")).not.toBeInTheDocument();
       expect(screen.queryByText("Segera hadir")).not.toBeInTheDocument();
     });

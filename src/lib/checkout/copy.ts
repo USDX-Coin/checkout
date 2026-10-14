@@ -146,7 +146,7 @@ export const CHECKOUT_COPY = {
   // rupiah nasabah dengan kursnya sendiri yang TIDAK kita ketahui, jadi Transfer BNI tidak pernah
   // menyebut angka rupiah. Sebelum /pay kode unik sen belum ada, jadi baris & detailnya juga tanpa
   // nominal USD — angkanya baru muncul di halaman instruksi (USDX-749 tampilan).
-  bniMethodSubtitle: "Bayar USD lewat wondr · kurs mengikuti BNI di aplikasi wondr · tanpa biaya",
+  bniMethodSubtitle: "Bayar USD lewat aplikasi wondr, kurs mengikuti BNI.",
   bniDetailNote:
     "Nominal transfer (termasuk kode unik sen yang ikut jadi USDX) muncul di langkah berikutnya.",
   bniContinueCta: "Lanjut, lihat nominal transfer",
