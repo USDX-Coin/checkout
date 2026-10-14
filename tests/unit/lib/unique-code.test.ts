@@ -1,29 +1,34 @@
 import { describe, test, expect } from "vitest";
-import { uniqueCodeAmount } from "@/lib/checkout/unique-code";
+import { uniqueCodeUsd } from "@/lib/checkout/unique-code";
 
-// Kontrak rev-17 R2 (`sot/api/mint.yaml` MintOrder.uniqueCode): `001`–`999`, tidak pernah `000`.
-describe("uniqueCodeAmount", () => {
+// Transfer BNI dalam USD (keputusan PM 14 Okt 2026, USDX-749): kode unik = sen `01`–`99`.
+describe("uniqueCodeUsd", () => {
   describe("positive", () => {
-    test("kode 3 digit ber-nol depan → rupiahnya", () => {
-      expect(uniqueCodeAmount("007")).toBe(7);
-      expect(uniqueCodeAmount("417")).toBe(417);
-      expect(uniqueCodeAmount("999")).toBe(999);
+    test("kode sen → dolar", () => {
+      expect(uniqueCodeUsd("47")).toBe(0.47);
+      expect(uniqueCodeUsd("99")).toBe(0.99);
+    });
+
+    test("kode ber-nol depan tetap terbaca", () => {
+      expect(uniqueCodeUsd("07")).toBe(0.07);
+      expect(uniqueCodeUsd("7")).toBe(0.07);
     });
   });
 
   describe("negative", () => {
-    test("000, kosong, null, bukan digit → null", () => {
-      expect(uniqueCodeAmount("000")).toBeNull();
-      expect(uniqueCodeAmount("")).toBeNull();
-      expect(uniqueCodeAmount(null)).toBeNull();
-      expect(uniqueCodeAmount(undefined)).toBeNull();
-      expect(uniqueCodeAmount("4a7")).toBeNull();
+    test("00, kosong, null, bukan digit → null", () => {
+      expect(uniqueCodeUsd("00")).toBeNull();
+      expect(uniqueCodeUsd("")).toBeNull();
+      expect(uniqueCodeUsd(null)).toBeNull();
+      expect(uniqueCodeUsd(undefined)).toBeNull();
+      expect(uniqueCodeUsd("4a")).toBeNull();
     });
   });
 
   describe("edge cases", () => {
-    test("lebih dari 3 digit (4 digit = langkah terencana, belum kontrak) → null", () => {
-      expect(uniqueCodeAmount("1234")).toBeNull();
+    test("kode 3 digit (Transfer BNI rupiah lama) tidak dibaca sebagai sen", () => {
+      expect(uniqueCodeUsd("417")).toBeNull();
+      expect(uniqueCodeUsd("047")).toBeNull();
     });
   });
 });

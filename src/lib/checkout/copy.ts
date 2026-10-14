@@ -139,14 +139,15 @@ export const CHECKOUT_COPY = {
   // back-office (rev-16). Label untuk nasabah: "Transfer BNI" dan "Virtual Account" (§4.3.3).
   bniTransferTitle: "Transfer BNI",
   vaTitle: "Virtual Account",
-  // week2.md § Checkout: "Kurs BNI Rp X, sesuai aplikasi wondr".
-  bniRateLine: (rate: string): string => `Kurs BNI ${rate}, sesuai aplikasi wondr`,
-  rateUpdatedAt: (when: string): string => `Diperbarui ${when}`,
   cheapestBadge: "Paling hemat",
   pickMethodCta: "Pilih metode pembayaran",
   payAmountCta: (amount: string): string => `Bayar ${amount}`,
-  // Rev-17 R8: total Transfer BNI sebelum /pay belum memuat kode unik (maks +999).
-  uniqueCodeEstimateNote: "Saat bayar ditambah kode unik (maks. Rp 999) supaya transfer kamu dikenali.",
+  // Transfer BNI = transfer USD (keputusan PM 14 Okt 2026, USDX-749). Estimasinya BELUM memuat kode
+  // unik sen (maks. $0,99) — kode itu ikut di-mint, jadi USDX yang diterima = USD yang ditransfer.
+  bniUniqueCodeMaxNote: "ditambah kode unik maks. $0,99",
+  bniUsdMethodNote: "Transfer USD dari aplikasi wondr by BNI.",
+  uniqueCodeEstimateNote:
+    "Saat bayar ditambah kode unik (maks. $0,99) supaya transfer kamu dikenali. Kodenya ikut jadi USDX — kamu menerima USDX sebanyak USD yang kamu transfer.",
   // Opsi yang tampil tapi tidak bisa dipilih untuk order ini (rev-17, `unavailableReason`).
   unavailableBadge: "Tidak tersedia",
   unavailableAboveMax: (max: string | null): string =>
@@ -156,20 +157,20 @@ export const CHECKOUT_COPY = {
   unavailableGeneric: "Metode ini tidak bisa dipakai untuk pesanan ini.",
   noMethodAvailable: "Belum ada metode pembayaran yang bisa dipakai untuk pesanan ini.",
 
-  // ── Instruksi Transfer BNI (desain PM 2 Okt 2026 + rev-17 R6) ──────────────────────────────
+  // ── Instruksi Transfer BNI (desain PM 2 Okt 2026; USD sejak keputusan PM 14 Okt 2026) ──────
   bniExactAmountLabel: "Transfer tepat",
   // Kode unik ditulis sebagai keterangan, TANPA sorotan digit (week2.md § Checkout, D25).
   bniIncludesUniqueCode: (amount: string): string => `sudah termasuk kode unik ${amount}`,
-  bniAccountLabel: "Ke rekening BNI",
-  copyBniAccountAriaLabel: "Salin nomor rekening BNI",
+  bniAccountLabel: "Ke rekening USD BNI",
+  copyBniAccountAriaLabel: "Salin nomor rekening USD BNI",
   bniAccountName: (name: string): string => `a.n. ${name}`,
+  bniYouReceive: "Kamu akan menerima",
   bniCountdownLabel: "Sisa waktu transfer",
   uniqueCodeLabel: "Kode unik",
-  bniExactWarning: "Transfer persis sampai digit terakhir, dalam satu kali transfer.",
-  // R6 — `sot/bni-integration.md` §4.3.12, teks instruksi dikutip apa adanya.
-  bniChannelLead: "Transfer dari rekening BNI atau lewat",
-  bniChannelBiFast: "BI-FAST",
-  bniChannelNoSkn: "SKN/kliring tidak didukung",
+  bniExactWarning: "Transfer persis sampai sen terakhir, dalam satu kali transfer.",
+  // Hanya transfer USD dari wondr by BNI — BI-FAST / bank lain tidak berlaku untuk rekening USD.
+  bniChannelLead: "Transfer USD dari aplikasi",
+  bniChannelApp: "wondr by BNI",
   bniChannelTail: "— dana yang tiba setelah batas waktu akan tertahan dan diproses manual.",
   bniWaiting: "Menunggu transfer kamu",
   bniExpiredBody:

@@ -813,62 +813,88 @@ describe("keadaan tak dikenal jatuh ke fallback yang aman, bukan ke tagihan", ()
   });
 });
 
-// D25 (USDX-764) — instruksi Transfer BNI setelah /pay. Kontrak: `sot/api/mint.yaml` MintOrder
-// (`virtualAccountNo` = rekening penampung, `totalPayIdr` sudah termasuk `uniqueCode`), pola UX
-// `sot/phase-2/week2.md` § Checkout, R6 `sot/bni-integration.md` §4.3.12.
-describe("instruksi Transfer BNI (D25)", () => {
+// Instruksi Transfer BNI setelah /pay — USD sejak keputusan PM 14 Okt 2026 (USDX-749). Kontrak
+// backend: `virtualAccountNo` + `collectionAccountName` = rekening USD penampung, `totalPayUsd` =
+// USD yang ditransfer persis (dasar + kode unik sen), `amount` = totalPayUsd (sen ikut di-mint),
+// `uniqueCode` = sen, `totalPayIdr` = padanan rupiah saja (bukan angka transfer).
+describe("instruksi Transfer BNI (USD, USDX-749)", () => {
   const BNI_MENUNGGU = makeOrder({
     paymentChannel: "BANK_TRANSFER",
     paymentBank: "BNI",
     paymentProvider: "BNI",
+    payCurrency: "USD",
     virtualAccountNo: "2083670928",
+    collectionAccountName: "PT Contoh Penampung",
+    amount: "3.47",
     rateAdjustmentPct: null,
-    effectiveRate: "16200.00",
-    subtotalIdr: "81000.00",
-    mintFeeIdr: "810.00",
+    effectiveRate: "16000.0000",
+    subtotalIdr: "55520.00",
+    mintFeeIdr: "0.00",
     pgFeeIdr: "0.00",
-    totalFeeIdr: "810.00",
-    totalPayIdr: "82227.00",
-    uniqueCode: "417",
+    totalFeeIdr: "0.00",
+    totalPayIdr: "55520.00",
+    totalPayUsd: "3.47",
+    uniqueCode: "47",
     expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
   });
 
   describe("positive", () => {
-    test("nominal tepat, rekening penampung dari backend, dan keterangan kode unik", () => {
+    test("nominal USD tepat, rekening USD dari backend, kode unik sen, dan USDX yang diterima", () => {
       renderWith(BNI_MENUNGGU);
-      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("Rp 82.227");
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$3,47");
+      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik $0,47");
+      expect(screen.getByText("Ke rekening USD BNI")).toBeInTheDocument();
       expect(screen.getByTestId("rekening-bni")).toHaveTextContent("2083 6709 28");
-      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik Rp 417");
+      expect(screen.getByTestId("nama-rekening-bni")).toHaveTextContent("a.n. PT Contoh Penampung");
+      expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent("Kamu akan menerima 3,47 USDX");
       expect(screen.getByText("Sisa waktu transfer")).toBeInTheDocument();
     });
 
-    test("R6: hanya kanal real-time — rekening BNI atau BI-FAST, SKN/kliring tidak didukung", () => {
+    test("instruksi: transfer USD dari aplikasi wondr by BNI saja", () => {
       renderWith(BNI_MENUNGGU);
-      const kanal = screen.getByTestId("kanal-bni");
-      expect(kanal).toHaveTextContent("Transfer dari rekening BNI atau lewat BI-FAST");
-      expect(kanal).toHaveTextContent("SKN/kliring tidak didukung");
+      expect(screen.getByTestId("kanal-bni")).toHaveTextContent(
+        "Transfer USD dari aplikasi wondr by BNI",
+      );
+      expect(screen.getByText("Transfer USD dari aplikasi wondr by BNI")).toBeInTheDocument();
     });
 
-    test("nama pemilik rekening dari backend tampil sebagai 'a.n. …'", () => {
-      renderWith({ ...BNI_MENUNGGU, collectionAccountName: "PT Contoh Penampung" });
-      expect(screen.getByTestId("nama-rekening-bni")).toHaveTextContent("a.n. PT Contoh Penampung");
-    });
-
-    test("salin nominal menyalin angka bulat tanpa titik ribuan", () => {
+    test("salin nominal menyalin '3.47' — titik desimal, tanpa simbol", () => {
       const writeText = vi.fn();
       Object.assign(navigator, { clipboard: { writeText } });
       renderWith(BNI_MENUNGGU);
       fireEvent.click(screen.getByRole("button", { name: "Salin total bayar" }));
-      expect(writeText).toHaveBeenCalledWith("82227");
+      expect(writeText).toHaveBeenCalledWith("3.47");
+    });
+
+    test("rincian pesanan dalam USD: nilai pesanan + kode unik = total bayar", () => {
+      renderWith(BNI_MENUNGGU);
+      fireEvent.click(screen.getByText("Rincian pesanan"));
+      expect(screen.getByText("Nilai pesanan").nextSibling).toHaveTextContent("$3,00");
+      expect(screen.getByText("Kode unik").nextSibling).toHaveTextContent("$0,47");
+      // Baris total di rincian (berlabel "Total bayar") — bukan angka besar di panel instruksi.
+      const totalRow = screen
+        .getAllByText("Total bayar")
+        .map((el) => el.parentElement!)
+        .find((row) => row.textContent?.includes("$"));
+      expect(totalRow).toHaveTextContent("Total bayar$3,47");
     });
   });
 
   describe("negative", () => {
-    test("tidak memakai teks Virtual Account dan tidak menyorot digit", () => {
+    test("padanan rupiah (totalPayIdr) TIDAK tampil sebagai angka transfer, tanpa kurs/biaya rupiah", () => {
+      renderWith(BNI_MENUNGGU);
+      fireEvent.click(screen.getByText("Rincian pesanan"));
+      expect(screen.queryByText(/Rp 55\.520/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Kurs terkunci")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Biaya mint/)).not.toBeInTheDocument();
+    });
+
+    test("tidak ada BI-FAST / bank lain / teks Virtual Account, dan digit tidak disorot", () => {
       const { container } = renderWith(BNI_MENUNGGU);
+      expect(screen.queryByText(/BI-FAST/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/bank lain/i)).not.toBeInTheDocument();
       expect(screen.queryByText("Nomor Virtual Account")).not.toBeInTheDocument();
       expect(screen.queryByText(/Masukkan nomor Virtual Account/)).not.toBeInTheDocument();
-      // Tiga digit terakhir tidak dipisah ke elemen sendiri.
       expect(screen.getByTestId("nominal-transfer-bni").children).toHaveLength(0);
       expect(container.querySelector("mark")).toBeNull();
     });
@@ -880,6 +906,12 @@ describe("instruksi Transfer BNI (D25)", () => {
       );
       expect(screen.queryByTestId("instruksi-transfer-bni")).not.toBeInTheDocument();
       expect(screen.getByText(/Jangan transfer ke rekening tadi/)).toBeInTheDocument();
+    });
+
+    test("totalPayUsd null → blok nominal tidak tampil (tidak jatuh ke rupiah)", () => {
+      renderWith({ ...BNI_MENUNGGU, totalPayUsd: null });
+      expect(screen.queryByTestId("nominal-transfer-bni")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Rp 55\.520/)).not.toBeInTheDocument();
     });
   });
 
@@ -893,16 +925,61 @@ describe("instruksi Transfer BNI (D25)", () => {
       }
     });
 
-    test("uniqueCode di luar kontrak (000) → keterangan kode unik tidak tampil", () => {
-      renderWith({ ...BNI_MENUNGGU, uniqueCode: "000" });
-      expect(screen.queryByTestId("kode-unik")).not.toBeInTheDocument();
-      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("Rp 82.227");
+    test("uniqueCode di luar kontrak (00, atau 3 digit rupiah lama) → keterangan kode unik tidak tampil", () => {
+      for (const uniqueCode of ["00", "417"]) {
+        const { unmount } = renderWith({ ...BNI_MENUNGGU, uniqueCode });
+        expect(screen.queryByTestId("kode-unik")).not.toBeInTheDocument();
+        expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$3,47");
+        unmount();
+      }
     });
 
-    test("rincian memuat baris kode unik dari backend, bukan tebakan dari selisih", () => {
-      renderWith(BNI_MENUNGGU);
-      fireEvent.click(screen.getByText("Rincian pesanan"));
-      expect(screen.getAllByText("Kode unik").length).toBeGreaterThan(0);
+    test("kode unik ber-nol depan ('07') → $0,07", () => {
+      renderWith({ ...BNI_MENUNGGU, amount: "3.07", totalPayUsd: "3.07", uniqueCode: "07" });
+      expect(screen.getByTestId("kode-unik")).toHaveTextContent("sudah termasuk kode unik $0,07");
+      expect(screen.getByTestId("terima-usdx-bni")).toHaveTextContent("3,07 USDX");
+    });
+
+    test("nominal ribuan dolar tetap gaya id-ID", () => {
+      renderWith({ ...BNI_MENUNGGU, amount: "1234.56", totalPayUsd: "1234.56", uniqueCode: "56" });
+      expect(screen.getByTestId("nominal-transfer-bni")).toHaveTextContent("$1.234,56");
+    });
+
+    test("sudah dibayar → hero menyebut USD yang diterima, bukan padanan rupiah", () => {
+      renderWith({
+        ...BNI_MENUNGGU,
+        paymentStatus: "PAID",
+        status: "WAITING_FOR_APPROVAL",
+        paidAt: "2026-10-14T05:00:00Z",
+      });
+      expect(screen.getByText("Pembayaran diterima")).toBeInTheDocument();
+      expect(screen.getByText("$3,47")).toBeInTheDocument();
+      expect(screen.queryByText(/Rp 55\.520/)).not.toBeInTheDocument();
+      expect(screen.getByText(/BNI USD 2083 6709 28/)).toBeInTheDocument();
+    });
+
+    test("order Transfer BNI rupiah lama (payCurrency IDR) yang sudah dibayar tetap menyebut rupiah", () => {
+      renderWith({
+        ...BNI_MENUNGGU,
+        payCurrency: "IDR",
+        totalPayUsd: null,
+        totalPayIdr: "82227.00",
+        uniqueCode: "417",
+        paymentStatus: "PAID",
+        status: "WAITING_FOR_APPROVAL",
+      });
+      expect(screen.getByText("Rp 82.227")).toBeInTheDocument();
+      expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    });
+
+    test("gagal setelah dibayar → '$3,47 sudah diterima'", () => {
+      renderWith({
+        ...BNI_MENUNGGU,
+        paymentStatus: "PAID",
+        status: "FAILED",
+        safeStatus: "REJECTED",
+      });
+      expect(screen.getByText("$3,47 sudah diterima")).toBeInTheDocument();
     });
 
     test("REQUESTED dengan kartu Transfer BNI dari channels[] — tanpa kartu statis 'Segera hadir'", () => {
@@ -925,16 +1002,20 @@ describe("instruksi Transfer BNI (D25)", () => {
               channel: "BANK_TRANSFER",
               pgFeeIdr: "0.00",
               banks: ["BNI"],
-              effectiveRate: "16200.00",
-              subtotalIdr: "81000.00",
-              mintFeeIdr: "810.00",
-              estimatedTotalPayIdr: "81810.00",
-              estimatedTotalPayMaxIdr: "82809.00",
+              effectiveRate: "16000.0000",
+              subtotalIdr: "48000.00",
+              mintFeeIdr: "0.00",
+              estimatedTotalPayIdr: "48000.00",
+              estimatedTotalPayMaxIdr: "63840.00",
+              currency: "USD",
+              estimatedTotalPayUsd: "3.00",
+              estimatedTotalPayMaxUsd: "3.99",
             },
           ],
         }),
       );
       expect(screen.getByRole("radio", { name: /Transfer BNI/ })).toBeEnabled();
+      expect(screen.getByText("$3,00")).toBeInTheDocument();
       expect(screen.queryByText("Transfer bank BNI")).not.toBeInTheDocument();
       expect(screen.queryByText("Segera hadir")).not.toBeInTheDocument();
     });

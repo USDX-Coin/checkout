@@ -8,9 +8,13 @@
 //  1. DAFTAR — tiap baris cuma NAMA metode + SATU angka total. "Paling hemat" hanya menempel di
 //     opsi yang `estimatedTotalPayMaxIdr`-nya benar-benar terkecil (rev-17 R8: total TERMASUK kode
 //     unik, Transfer BNI +999 sebelum /pay). Tidak ada penanda tetap untuk metode tertentu.
-//  2. DETAIL membuka di bawah opsi yang diketuk: Transfer BNI → kurs BNI + sumbernya; Virtual
+//  2. DETAIL membuka di bawah opsi yang diketuk: Transfer BNI → transfer USD dari wondr; Virtual
 //     Account → pilih bank (biaya per bank dari `bankOptions[]`). Lalu rincian harga metode itu.
-//  3. Tombol utama menyebut angkanya: "Bayar Rp X".
+//  3. Tombol utama menyebut angkanya: "Bayar Rp X" (Transfer BNI: "Bayar $X").
+//
+// Transfer BNI = transfer USD (keputusan PM 14 Okt 2026, USDX-749): angkanya `estimatedTotalPayUsd`
+// (USDX dipotong ke sen, BELUM termasuk kode unik maks. $0,99), tanpa kurs dan tanpa rincian rupiah.
+// "Paling hemat" tetap dinilai dalam rupiah lewat `estimatedTotalPayMaxIdr` (padanan rupiahnya).
 //
 // TIDAK ADA kartu statis dan TIDAK ADA urutan yang dipatok di sini. Daftar metode, urutannya, dan
 // biayanya diatur admin dari back-office (`payment_methods`, rev-16 §4.3.11) dan sampai ke sini
@@ -32,7 +36,7 @@ import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
 import { Button } from "@/components/ui/button";
 import { CardChoice } from "@/components/ui/card-choice";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { formatIDR, formatRate, formatWibDateTime, cn } from "@/lib/utils";
+import { formatIDR, formatRate, formatUSD, cn } from "@/lib/utils";
 
 /** Channel yang bisa digambar halaman ini. Kontrak menyatakan enum `PaymentChannel` terbuka —
  *  channel yang tak dikenal TIDAK ditawarkan: tombol bayar untuk instrumen yang instruksinya
@@ -50,6 +54,15 @@ function num(v: string | null | undefined): number | null {
 /** Absen = tersedia (backend sebelum rev-17 tidak mengirim field ini). */
 function isAvailable(o: { available?: boolean }): boolean {
   return o.available !== false;
+}
+
+/**
+ * Transfer BNI: USD yang ditransfer sebelum kode unik (`estimatedTotalPayUsd`), atau null kalau
+ * backend tak mengirimnya. Tidak ada jalan pulang ke rupiah: angka rupiahnya cuma padanan, bukan
+ * yang ditransfer nasabah.
+ */
+function bniUsdEstimate(option: MintChannelOption): string | null {
+  return num(option.estimatedTotalPayUsd) === null ? null : option.estimatedTotalPayUsd!;
 }
 
 function channelTitle(channel: PaymentChannel): string {
@@ -329,33 +342,43 @@ export function PaymentMethodSelector({
     ? priceOf(selectedOption, legacy, effectiveBank ? bankOptionOf(effectiveBank) : null)
     : null;
 
+  const selectedBniUsd =
+    selectedOption?.channel === "BANK_TRANSFER" ? bniUsdEstimate(selectedOption) : null;
   const payLabel =
     selectedPrice === null
       ? CHECKOUT_COPY.pickMethodCta
-      : selectedPrice.total !== null
-        ? CHECKOUT_COPY.payAmountCta(formatIDR(selectedPrice.total))
-        : CHECKOUT_COPY.payCta;
+      : selectedOption?.channel === "BANK_TRANSFER"
+        ? selectedBniUsd !== null
+          ? CHECKOUT_COPY.payAmountCta(formatUSD(selectedBniUsd))
+          : CHECKOUT_COPY.payCta
+        : selectedPrice.total !== null
+          ? CHECKOUT_COPY.payAmountCta(formatIDR(selectedPrice.total))
+          : CHECKOUT_COPY.payCta;
 
   function detail(option: MintChannelOption) {
     const ch = option.channel;
     const p = priceOf(option, legacy, effectiveBank ? bankOptionOf(effectiveBank) : null);
-    const hasBreakdown = p.subtotal !== null && p.mintFee !== null;
-    const rateUpdatedAt = formatWibDateTime(option.rateUpdatedAt);
+    // Transfer BNI tidak punya rincian rupiah: yang ditransfer USD, dan USD itu seluruhnya jadi USDX.
+    const hasBreakdown = ch !== "BANK_TRANSFER" && p.subtotal !== null && p.mintFee !== null;
     const feeVaries = bankFeesVary(option) && effectiveBank === null;
     return (
       <div
         data-testid={`detail-${ch}`}
         className="flex flex-col gap-3 rounded-lg bg-muted p-3 min-[544px]:p-4"
       >
-        {ch === "BANK_TRANSFER" && p.rate !== null && (
-          <div className="flex flex-col gap-0.5 text-sm text-foreground">
-            <p>{CHECKOUT_COPY.bniRateLine(formatRate(p.rate))}</p>
-            {rateUpdatedAt && (
-              <p className="text-xs text-muted-foreground">
-                {CHECKOUT_COPY.rateUpdatedAt(rateUpdatedAt)}
-              </p>
-            )}
-          </div>
+        {ch === "BANK_TRANSFER" && (
+          <>
+            <p className="text-sm text-foreground">{CHECKOUT_COPY.bniUsdMethodNote}</p>
+            <div className="flex flex-col gap-2 border-t border-border pt-3">
+              <FeeRow
+                label={TOTAL_LABEL}
+                value={formatUSD(bniUsdEstimate(option))}
+                strong
+              />
+              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.uniqueCodeEstimateNote}</p>
+              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.estimateNote}</p>
+            </div>
+          </>
         )}
 
         {ch === "QRIS" && <p className="text-sm text-foreground">{CHECKOUT_COPY.qrisDescription}</p>}
@@ -424,7 +447,7 @@ export function PaymentMethodSelector({
 
         {hasBreakdown && (
           <div className="flex flex-col gap-2 border-t border-border pt-3">
-            {ch !== "BANK_TRANSFER" && p.rate !== null && (
+            {p.rate !== null && (
               <FeeRow label={CHECKOUT_COPY.rateLabel} value={CHECKOUT_COPY.perUsdx(formatRate(p.rate))} />
             )}
             <FeeRow label={CHECKOUT_COPY.usdxValueLabel} value={formatIDR(p.subtotal!)} />
@@ -449,9 +472,6 @@ export function PaymentMethodSelector({
                 strong
               />
             )}
-            {ch === "BANK_TRANSFER" && (
-              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.uniqueCodeEstimateNote}</p>
-            )}
             {/* `channels[]` hanya estimasi: `/pay` membaca ulang kurs lalu mengunci (D25-d). */}
             <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.estimateNote}</p>
           </div>
@@ -475,6 +495,7 @@ export function PaymentMethodSelector({
             const ch = opt.channel;
             const available = isAvailable(opt);
             const total = priceOf(opt, legacy).total;
+            const bniUsd = ch === "BANK_TRANSFER" ? bniUsdEstimate(opt) : null;
             const isOpen = selectedChannel === ch;
             return (
               <div key={ch} className="flex flex-col gap-2">
@@ -492,12 +513,21 @@ export function PaymentMethodSelector({
                       <span className="text-sm font-semibold whitespace-nowrap text-foreground tabular-nums">
                         {!available
                           ? CHECKOUT_COPY.unavailableBadge
-                          : total === null
-                            ? "—"
-                            : bankFeesVary(opt)
-                              ? `mulai ${formatIDR(total)}`
-                              : formatIDR(total)}
+                          : ch === "BANK_TRANSFER"
+                            ? formatUSD(bniUsd)
+                            : total === null
+                              ? "—"
+                              : bankFeesVary(opt)
+                                ? `mulai ${formatIDR(total)}`
+                                : formatIDR(total)}
                       </span>
+                      {/* Estimasi USD belum memuat kode unik sen — batas atasnya disebut di
+                          tempat angkanya, bukan baru di detail. */}
+                      {available && bniUsd !== null && (
+                        <span className="text-[11px] leading-none whitespace-nowrap text-muted-foreground">
+                          {CHECKOUT_COPY.bniUniqueCodeMaxNote}
+                        </span>
+                      )}
                       {cheapest === ch && (
                         <Badge tone="success">{CHECKOUT_COPY.cheapestBadge}</Badge>
                       )}
