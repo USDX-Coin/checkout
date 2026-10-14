@@ -37,7 +37,7 @@ import { MintStatusTracker } from "@/components/checkout/MintStatusTracker";
 import { CopyField } from "@/components/ui/copy-field";
 import { BANK_BRAND, QRIS_RED } from "@/lib/constants";
 import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
-import { uniqueCodeAmount } from "@/lib/checkout/unique-code";
+import { uniqueCodeUsd } from "@/lib/checkout/unique-code";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LinkInline } from "@/components/ui/link-inline";
@@ -46,10 +46,26 @@ import {
   formatIDR,
   formatCountdown,
   formatTokenAmount,
+  formatUSD,
   formatWibDateTime,
   truncateAddress,
 } from "@/lib/utils";
 import type { MintChannelOption, MintOrderDetail, PaymentChannel } from "@/types";
+
+/**
+ * Nominal yang DITRANSFER nasabah, terformat — atau null kalau backend tak mengirimnya.
+ *
+ * Mata uangnya dari `payCurrency` backend, bukan dari channel: Transfer BNI sejak USDX-749 (keputusan
+ * PM 14 Okt 2026) ditagih USD (`totalPayUsd`; `totalPayIdr`-nya cuma padanan rupiah dan TIDAK PERNAH
+ * ditampilkan sebagai yang dibayar), tapi order Transfer BNI rupiah dari sebelum peralihan tetap
+ * `payCurrency: "IDR"` — menebak dari channel akan menyebut dolar untuk orang yang mengirim rupiah.
+ */
+function paidAmountText(order: MintOrderDetail): string | null {
+  if (order.payCurrency === "USD") {
+    return order.totalPayUsd ? formatUSD(order.totalPayUsd) : null;
+  }
+  return order.totalPayIdr ? formatIDR(Number(order.totalPayIdr)) : null;
+}
 
 // Kelompokkan digit per 4 biar nomor VA gampang dibaca (8878 4716 9037 8849).
 function groupDigits(s: string): string {
@@ -306,17 +322,17 @@ function QrisInstruction({
 }
 
 /**
- * Instruksi Transfer BNI (D25 — `sot/phase-2/week2.md` § Checkout, `sot/bni-integration.md` §4.2
- * langkah 3 + §4.3.12 R6; tata letak desain PM 2 Okt 2026).
+ * Instruksi Transfer BNI (D25 — `sot/phase-2/week2.md` § Checkout; tata letak desain PM 2 Okt 2026;
+ * USD sejak keputusan PM 14 Okt 2026, USDX-749).
  *
- * Tiga hal untuk mentransfer, di urutan ini: NOMINAL (`totalPayIdr`, sudah termasuk kode unik —
- * besar, bisa disalin), REKENING tujuan (`virtualAccountNo` = rekening penampung, bisa disalin),
- * dan SISA WAKTU (15 menit sejak /pay, dari `expiresAt`). Sisanya kecil di bawahnya.
+ * Transfer BNI = transfer USD dari aplikasi wondr by BNI ke rekening USD BNI penampung. Urutannya:
+ * NOMINAL (`totalPayUsd`, sudah termasuk kode unik sen — besar, bisa disalin), REKENING tujuan
+ * (`virtualAccountNo` + `collectionAccountName`, dari backend), USDX yang diterima (`amount` = USD
+ * yang ditransfer, kode unik ikut di-mint), lalu SISA WAKTU.
  *
- * Kode unik ditulis sebagai keterangan "sudah termasuk kode unik Rp N" — TANPA sorotan digit
- * (kontrak: sorotan tiga digit terakhir belum tentu sama dengan kodenya, karena kode DITAMBAHKAN).
- * Nomor rekening TIDAK ditulis di kode: backend mengirim rekening penampung environment-nya
- * sendiri (prod `2083670928`, sandbox lain).
+ * Kode unik ditulis sebagai keterangan "sudah termasuk kode unik $0,47" — TANPA sorotan digit.
+ * `totalPayIdr` order ini cuma padanan rupiah dan tidak ditampilkan sebagai angka transfer. Nomor dan
+ * nama rekening TIDAK ditulis di kode: backend mengirim rekening penampung environment-nya sendiri.
  */
 function BniTransferInstructions({
   order,
@@ -329,11 +345,11 @@ function BniTransferInstructions({
 }) {
   const account = order.virtualAccountNo;
   const accountName = order.collectionAccountName?.trim() || null;
-  const totalNum = order.totalPayIdr != null ? Number(order.totalPayIdr) : NaN;
-  // Floor, bukan round: `total_pay_idr` sudah dibulatkan ke bawah oleh backend; desimal ",00" di
-  // string-nya tidak boleh menggeser angka yang diketik orang di aplikasi bank.
-  const totalWhole = Number.isFinite(totalNum) ? Math.floor(totalNum) : null;
-  const code = uniqueCodeAmount(order.uniqueCode);
+  const usdNum = order.totalPayUsd != null && order.totalPayUsd !== "" ? Number(order.totalPayUsd) : NaN;
+  // Yang disalin "3.47": titik desimal, tanpa simbol — bentuk yang diterima kolom nominal aplikasi.
+  // Tak terbaca → blok nominal tidak tampil; menebak angka transfer lebih mahal daripada diam.
+  const usdCopy = Number.isFinite(usdNum) && usdNum > 0 ? usdNum.toFixed(2) : null;
+  const code = uniqueCodeUsd(order.uniqueCode);
   return (
     <div data-testid="instruksi-transfer-bni" className="flex flex-col gap-4 rounded-xl bg-muted p-4">
       <div className="flex items-center gap-2">
@@ -344,8 +360,8 @@ function BniTransferInstructions({
         <span className="text-sm font-medium text-foreground">{CHECKOUT_COPY.bniTransferTitle}</span>
       </div>
 
-      {/* 1 · Nominal */}
-      {totalWhole !== null && (
+      {/* 1 · Nominal (USD) */}
+      {usdCopy !== null && (
         <div className="flex flex-col gap-1">
           <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniExactAmountLabel}</p>
           <div className="flex items-center justify-between gap-2">
@@ -353,15 +369,13 @@ function BniTransferInstructions({
               data-testid="nominal-transfer-bni"
               className="text-3xl leading-9 font-semibold text-foreground tabular-nums"
             >
-              {formatIDR(totalWhole)}
+              {formatUSD(usdCopy)}
             </span>
-            {/* Yang disalin angka bulat tanpa titik ribuan — itu yang diterima kolom nominal
-                aplikasi bank. */}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onCopy(String(totalWhole))}
+              onClick={() => onCopy(usdCopy)}
               aria-label={CHECKOUT_COPY.copyTotalAriaLabel}
             >
               <Copy /> Salin
@@ -369,7 +383,7 @@ function BniTransferInstructions({
           </div>
           {code !== null && (
             <p className="text-xs text-muted-foreground" data-testid="kode-unik">
-              {CHECKOUT_COPY.bniIncludesUniqueCode(formatIDR(code))}
+              {CHECKOUT_COPY.bniIncludesUniqueCode(formatUSD(code))}
             </p>
           )}
         </div>
@@ -407,7 +421,15 @@ function BniTransferInstructions({
         </div>
       </div>
 
-      {/* 3 · Sisa waktu */}
+      {/* 3 · Yang diterima — kode unik ikut di-mint, jadi USDX = USD yang ditransfer. */}
+      {usdCopy !== null && (
+        <p className="text-sm text-foreground" data-testid="terima-usdx-bni">
+          {CHECKOUT_COPY.bniYouReceive}{" "}
+          <span className="font-semibold">{formatTokenAmount(order.amount)} USDX</span>
+        </p>
+      )}
+
+      {/* 4 · Sisa waktu */}
       {countdown && (
         <div className="flex items-center justify-between gap-3 rounded-lg bg-card px-3 py-2 shadow-[inset_0_0_0_1px_var(--color-border)]">
           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -418,12 +440,11 @@ function BniTransferInstructions({
         </div>
       )}
 
-      {/* R6 — hanya kanal real-time. Teks dikutip dari SOT §4.3.12. */}
+      {/* Rekening USD: hanya transfer USD dari wondr by BNI (tanpa BI-FAST / bank lain). */}
       <Alert tone="warning">
         <span data-testid="kanal-bni">
           {CHECKOUT_COPY.bniExactWarning} {CHECKOUT_COPY.bniChannelLead}{" "}
-          <strong>{CHECKOUT_COPY.bniChannelBiFast}</strong>.{" "}
-          <strong>{CHECKOUT_COPY.bniChannelNoSkn}</strong> {CHECKOUT_COPY.bniChannelTail}
+          <strong>{CHECKOUT_COPY.bniChannelApp}</strong> {CHECKOUT_COPY.bniChannelTail}
         </span>
       </Alert>
 
@@ -569,25 +590,16 @@ function HowToPay({
         </Accordion>
       ) : channel === "BANK_TRANSFER" ? (
         // Teks VA ("masukkan nomor Virtual Account") TIDAK dipakai di sini: tujuannya rekening
-        // biasa, dan yang membuat transfernya dikenali adalah nominalnya. Hanya kanal real-time
-        // (R6): sesama BNI atau BI-FAST.
-        <>
-          <Accordion title="Dari rekening BNI (wondr / BNI Mobile Banking / ATM BNI)">
-            <ol className="list-decimal space-y-1 pl-4">
-              <li>Pilih menu Transfer ke sesama rekening BNI.</li>
-              <li>Masukkan nomor rekening tujuan di atas.</li>
-              <li>Masukkan nominal tepat sampai digit terakhir, lalu konfirmasi.</li>
-            </ol>
-          </Accordion>
-          <Accordion title="Dari bank lain (BI-FAST)">
-            <ol className="list-decimal space-y-1 pl-4">
-              <li>Pilih Transfer antar bank dengan layanan BI-FAST, bank tujuan BNI.</li>
-              <li>Masukkan nomor rekening tujuan di atas.</li>
-              <li>Masukkan nominal tepat sampai digit terakhir, lalu konfirmasi.</li>
-              <li>Jangan pakai SKN/kliring — tidak didukung.</li>
-            </ol>
-          </Accordion>
-        </>
+        // biasa, dan yang membuat transfernya dikenali adalah nominalnya. Rekening tujuannya rekening
+        // USD (USDX-749) — satu-satunya jalan: transfer USD dari wondr by BNI. Tidak ada BI-FAST /
+        // bank lain.
+        <Accordion title="Transfer USD dari aplikasi wondr by BNI">
+          <ol className="list-decimal space-y-1 pl-4">
+            <li>Buka aplikasi wondr by BNI, lalu pilih transfer ke sesama rekening BNI dalam USD.</li>
+            <li>Masukkan nomor rekening USD tujuan di atas.</li>
+            <li>Masukkan nominal dalam USD tepat sampai sen terakhir, lalu konfirmasi.</li>
+          </ol>
+        </Accordion>
       ) : (
         <>
           <Accordion title="Transfer dari bank lain (antar bank)">
@@ -640,6 +652,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 // harus bisa ditelusuri, bukan bikin user menebak. Sisa dihitung dari selisih supaya baris-
 // barisnya selalu menjumlah ke total yang benar-benar ditagih.
 function FeeRows({ order }: { order: MintOrderDetail }) {
+  if (order.paymentChannel === "BANK_TRANSFER") return <BniUsdFeeRows order={order} />;
   const subtotal = Number(order.subtotalIdr);
   const mintFee = Number(order.mintFeeIdr);
   const total = Number(order.totalPayIdr);
@@ -650,10 +663,7 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
   const pgFeeKnown = order.pgFeeIdr !== null && Number.isFinite(Number(order.pgFeeIdr));
   const pgFee = pgFeeKnown ? Number(order.pgFeeIdr) : 0;
   if (![subtotal, mintFee, total].every(Number.isFinite)) return null;
-  // Kode unik Transfer BNI dikirim backend apa adanya (`uniqueCode`) — barisnya memakai angka itu,
-  // bukan menebaknya dari selisih.
-  const code = uniqueCodeAmount(order.uniqueCode);
-  const residual = Math.round(total - subtotal - mintFee - pgFee - (code ?? 0));
+  const residual = Math.round(total - subtotal - mintFee - pgFee);
 
   return (
     <div className="flex flex-col gap-2 pt-1">
@@ -675,14 +685,11 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
       {pgFeeKnown && (
         <DetailRow label={CHECKOUT_COPY.serviceFeeLabel}>{formatIDR(pgFee)}</DetailRow>
       )}
-      {/* Provider yang memakai kode unik (BNI) menempelkannya ke total — tanpa baris ini
-          rincian tidak menjumlah ke angka yang benar-benar ditagih. Sisa NEGATIF mustahil
-          sebagai kode unik, jadi labelnya netral: kami tak mengarang sebabnya. */}
-      {code !== null && (
-        <DetailRow label={CHECKOUT_COPY.uniqueCodeLabel}>{formatIDR(code)}</DetailRow>
-      )}
+      {/* Selisih yang tak terjelaskan baris lain (provider yang menempelkan kode unik ke total).
+          Sisa NEGATIF mustahil sebagai kode unik, jadi labelnya netral: kami tak mengarang
+          sebabnya. */}
       {residual !== 0 && (
-        <DetailRow label={code === null && pgFeeKnown && residual > 0 ? CHECKOUT_COPY.uniqueCodeLabel : "Penyesuaian"}>
+        <DetailRow label={pgFeeKnown && residual > 0 ? CHECKOUT_COPY.uniqueCodeLabel : "Penyesuaian"}>
           {formatIDR(residual)}
         </DetailRow>
       )}
@@ -691,6 +698,32 @@ function FeeRows({ order }: { order: MintOrderDetail }) {
       <div className="flex items-center justify-between gap-3 py-0.5 font-medium text-foreground">
         <span>{TOTAL_LABEL}</span>
         <span className="font-semibold">{formatIDR(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Rincian Transfer BNI dalam USD (USDX-749): nilai pesanan + kode unik sen = total yang ditransfer.
+ * Tanpa kurs, biaya mint, atau biaya layanan rupiah — nasabah mengirim USD dan seluruhnya di-mint
+ * (mint fee 0). Nilai pesanan = total − kode, dihitung dalam SEN supaya tidak ada sisa float.
+ */
+function BniUsdFeeRows({ order }: { order: MintOrderDetail }) {
+  const total = order.totalPayUsd != null && order.totalPayUsd !== "" ? Number(order.totalPayUsd) : NaN;
+  if (!Number.isFinite(total)) return null;
+  const code = uniqueCodeUsd(order.uniqueCode);
+  const baseCents = Math.round(total * 100) - Math.round((code ?? 0) * 100);
+  return (
+    <div className="flex flex-col gap-2 pt-1">
+      {code !== null && (
+        <>
+          <DetailRow label={CHECKOUT_COPY.orderValueLabel}>{formatUSD(baseCents / 100)}</DetailRow>
+          <DetailRow label={CHECKOUT_COPY.uniqueCodeLabel}>{formatUSD(code)}</DetailRow>
+        </>
+      )}
+      <div className="flex items-center justify-between gap-3 py-0.5 font-medium text-foreground">
+        <span>{TOTAL_LABEL}</span>
+        <span className="font-semibold">{formatUSD(total)}</span>
       </div>
     </div>
   );
@@ -719,7 +752,7 @@ function PaymentDetails({
           <DetailRow label="Metode">{CHECKOUT_COPY.bniTransferTitle}</DetailRow>
           {order.virtualAccountNo && (
             <DetailRow label="Rekening tujuan">
-              <span className="font-mono">BNI {groupDigits(order.virtualAccountNo)}</span>
+              <span className="font-mono">BNI USD {groupDigits(order.virtualAccountNo)}</span>
             </DetailRow>
           )}
         </>
@@ -775,6 +808,7 @@ function PaidState({
   // layarnya sendiri, `FailedPaidState` (B4). Dulu keadaan itu ditampung di sini dengan satu
   // kalimat yang berbeda di bawah judul hijau yang sama — dan judul yang menang dibaca.
   const paidAt = formatWibDateTime(order.paidAt);
+  const paidAmount = paidAmountText(order);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-1.5 rounded-xl bg-success/10 p-4 text-center">
@@ -782,11 +816,7 @@ function PaidState({
           <CheckCircle2 className="size-6" />
         </span>
         <p className="text-sm font-semibold text-foreground">Pembayaran diterima</p>
-        {order.totalPayIdr && (
-          <p className="text-lg font-semibold text-foreground">
-            {formatIDR(Number(order.totalPayIdr))}
-          </p>
-        )}
+        {paidAmount && <p className="text-lg font-semibold text-foreground">{paidAmount}</p>}
         {paidAt && <p className="text-xs text-foreground">{paidAt}</p>}
         <p className="text-xs leading-relaxed text-foreground">
           Tidak perlu transfer lagi. Pesanan kamu sedang diproses.
@@ -878,6 +908,7 @@ function FailedPaidState({
   // Kredit yang ditolak ops: nominal yang benar-benar masuk TIDAK dikirim ke FE (justru
   // ketidakcocokannya yang menyeret order ke HELD), jadi tak ada angka yang boleh diklaim.
   const rejectedHeld = order.paymentStatus === "HELD";
+  const paidAmount = paidAmountText(order);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col items-center gap-1.5 rounded-xl bg-destructive/10 p-4 text-center">
@@ -887,9 +918,9 @@ function FailedPaidState({
         <p className="text-sm font-semibold text-destructive-text">
           {rejectedHeld ? CHECKOUT_COPY.heldRejectedHeading : CHECKOUT_COPY.failedPaidHeading}
         </p>
-        {!rejectedHeld && order.totalPayIdr && (
+        {!rejectedHeld && paidAmount && (
           <p className="text-lg font-semibold text-foreground">
-            {CHECKOUT_COPY.failedPaidAmount(formatIDR(Number(order.totalPayIdr)))}
+            {CHECKOUT_COPY.failedPaidAmount(paidAmount)}
           </p>
         )}
         {paidAt && <p className="text-xs text-foreground">{paidAt}</p>}
