@@ -11,17 +11,22 @@ import type { MintChannelOption } from "@/types";
 // (rev-16/17), pola UX `sot/phase-2/week2.md` § Checkout, aturan `sot/bni-integration.md` §4.3.
 // Semua kartu dari `channels[]` — tidak ada kartu statis, tidak ada urutan yang dipatok FE.
 
-// ── Fixture sesuai kontrak D25 ───────────────────────────────────────────────────────────────
+// ── Fixture sesuai kontrak D25 + USDX-749 (Transfer BNI = transfer USD) ───────────────────────
+// 5 USDX, kurs dasar 16.200: dasar $5,00 (Rp 81.000), batas atas $5,99 (Rp 97.038). Tanpa kurs BNI
+// (effectiveRate = kurs dasar, rateUpdatedAt null) dan tanpa mint fee.
 const BNI: MintChannelOption = {
   channel: "BANK_TRANSFER",
   rateAdjustmentPct: null,
-  effectiveRate: "16200.00",
-  rateUpdatedAt: "2026-10-13T02:00:00Z",
+  effectiveRate: "16200.0000",
+  rateUpdatedAt: null,
   subtotalIdr: "81000.00",
-  mintFeeIdr: "810.00",
+  mintFeeIdr: "0.00",
   pgFeeIdr: "0.00",
-  estimatedTotalPayIdr: "81810.00",
+  estimatedTotalPayIdr: "81000.00",
   estimatedTotalPayMaxIdr: "82809.00",
+  currency: "USD",
+  estimatedTotalPayUsd: "5.00",
+  estimatedTotalPayMaxUsd: "5.99",
   available: true,
   unavailableReason: null,
   maxAmountIdr: "10000000.00",
@@ -33,8 +38,11 @@ const BNI: MintChannelOption = {
       feeType: "FLAT_IDR",
       feeValue: "0.00",
       pgFeeIdr: "0.00",
-      estimatedTotalPayIdr: "81810.00",
+      estimatedTotalPayIdr: "81000.00",
       estimatedTotalPayMaxIdr: "82809.00",
+      currency: "USD",
+      estimatedTotalPayUsd: "5.00",
+      estimatedTotalPayMaxUsd: "5.99",
       available: true,
       unavailableReason: null,
       maxAmountIdr: "10000000.00",
@@ -92,7 +100,9 @@ describe("daftar metode datang dari backend (rev-16)", () => {
       renderSelector([BNI, VA]);
       expect(card(/Transfer BNI/)).toBeInTheDocument();
       expect(card(/Virtual Account/)).toBeInTheDocument();
-      expect(screen.getByText("Rp 81.810")).toBeInTheDocument();
+      // Transfer BNI dalam USD + batas kode unik; VA tetap rupiah.
+      expect(screen.getByText("$5,00")).toBeInTheDocument();
+      expect(screen.getByText("ditambah kode unik maks. $0,99")).toBeInTheDocument();
       expect(screen.getByText("Rp 86.820")).toBeInTheDocument();
     });
 
@@ -244,21 +254,21 @@ describe("opsi yang tidak tersedia untuk order ini (rev-17)", () => {
   });
 });
 
-describe("Transfer BNI dipilih", () => {
+describe("Transfer BNI dipilih (USD, USDX-749)", () => {
   describe("positive", () => {
-    test("detail: kurs BNI sesuai aplikasi wondr + catatan kode unik maks Rp 999", () => {
+    test("detail: transfer USD dari wondr, total USD, catatan kode unik maks $0,99", () => {
       renderSelector([BNI, VA]);
       fireEvent.click(card(/Transfer BNI/));
       const detail = screen.getByTestId("detail-BANK_TRANSFER");
-      expect(within(detail).getByText("Kurs BNI Rp 16.200, sesuai aplikasi wondr")).toBeInTheDocument();
-      expect(within(detail).getByText(/Diperbarui 13 Okt 2026/)).toBeInTheDocument();
-      expect(within(detail).getByText(/kode unik \(maks\. Rp 999\)/)).toBeInTheDocument();
+      expect(within(detail).getByText("Transfer USD dari aplikasi wondr by BNI.")).toBeInTheDocument();
+      expect(within(detail).getByText("$5,00")).toBeInTheDocument();
+      expect(within(detail).getByText(/kode unik \(maks\. \$0,99\)/)).toBeInTheDocument();
     });
 
-    test("tombol menyebut angkanya dan mengirim channel=BANK_TRANSFER, bank=BNI", () => {
+    test("tombol menyebut angka USD dan mengirim channel=BANK_TRANSFER, bank=BNI", () => {
       const { onPay } = renderSelector([BNI, VA]);
       fireEvent.click(card(/Transfer BNI/));
-      expect(payButton()).toHaveTextContent("Bayar Rp 81.810");
+      expect(payButton()).toHaveTextContent("Bayar $5,00");
       fireEvent.click(payButton());
       expect(onPay).toHaveBeenCalledWith("BANK_TRANSFER", "BNI");
     });
@@ -270,13 +280,36 @@ describe("Transfer BNI dipilih", () => {
       fireEvent.click(card(/Transfer BNI/));
       expect(screen.queryByRole("radiogroup", { name: "Pilih bank" })).not.toBeInTheDocument();
     });
+
+    test("tanpa kurs BNI dan tanpa rincian rupiah — padanan rupiah tidak tampil", () => {
+      renderSelector([{ ...BNI, rateUpdatedAt: "2026-10-13T02:00:00Z" }, VA]);
+      fireEvent.click(card(/Transfer BNI/));
+      const detail = screen.getByTestId("detail-BANK_TRANSFER");
+      expect(within(detail).queryByText(/Kurs/)).not.toBeInTheDocument();
+      expect(within(detail).queryByText(/Diperbarui/)).not.toBeInTheDocument();
+      expect(within(detail).queryByText(/wondr,/)).not.toBeInTheDocument();
+      expect(within(detail).queryByText(/Rp/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Rp 81.000")).not.toBeInTheDocument();
+    });
   });
 
   describe("edge cases", () => {
-    test("kurs berdesimal tidak dibulatkan ke rupiah", () => {
-      renderSelector([{ ...BNI, effectiveRate: "16412.50" }, VA]);
+    test("estimatedTotalPayUsd absen → '—' dan tombol tanpa angka, TIDAK jatuh ke rupiah", () => {
+      renderSelector([{ ...BNI, estimatedTotalPayUsd: null }, VA]);
+      expect(screen.queryByText("Rp 81.000")).not.toBeInTheDocument();
+      expect(screen.queryByText("ditambah kode unik maks. $0,99")).not.toBeInTheDocument();
       fireEvent.click(card(/Transfer BNI/));
-      expect(screen.getByText("Kurs BNI Rp 16.412,50, sesuai aplikasi wondr")).toBeInTheDocument();
+      expect(payButton()).toHaveTextContent(/^Bayar sekarang$/);
+    });
+
+    test("estimasi bersen ditampilkan apa adanya ($3,12)", () => {
+      renderSelector([{ ...BNI, estimatedTotalPayUsd: "3.12", estimatedTotalPayMaxUsd: "4.11" }]);
+      expect(screen.getByText("$3,12")).toBeInTheDocument();
+    });
+
+    test("opsi BNI tidak tersedia → tanpa catatan kode unik di kartunya", () => {
+      renderSelector([{ ...BNI, available: false, unavailableReason: "AMOUNT_ABOVE_METHOD_MAX" }, VA]);
+      expect(screen.queryByText("ditambah kode unik maks. $0,99")).not.toBeInTheDocument();
     });
   });
 });

@@ -25,6 +25,11 @@ export type PaymentMode = "SIMULATION" | "LIVE";
 export type VaBank = (typeof VA_BANKS)[number];
 
 export type AmountCurrency = "USD" | "IDR";
+/**
+ * Mata uang yang DITRANSFER nasabah (USDX-749, keputusan PM 14 Okt 2026): Transfer BNI
+ * (`BANK_TRANSFER`) = transfer USD dari wondr ke rekening USD BNI penampung; metode lain rupiah.
+ */
+export type PayCurrency = "USD" | "IDR";
 export type ConsumerOrderType = "MINT" | "REDEEM";
 
 // 3 dimensi status order mint (conventions.md § Status Enums → Mint Order).
@@ -69,8 +74,14 @@ export interface MintChannelBankOption {
   pgFeeIdr: string;
   /** subtotal + mint fee + biaya bank ini (floor). `BANK_TRANSFER`: BELUM termasuk kode unik. */
   estimatedTotalPayIdr: string;
-  /** Rev-17 R8 — `BANK_TRANSFER`: + 999 (batas atas kode unik); lainnya = estimatedTotalPayIdr. */
+  /** Rev-17 R8 — `BANK_TRANSFER`: padanan rupiah batas atas (+$0,99); lainnya = estimatedTotalPayIdr. */
   estimatedTotalPayMaxIdr?: string;
+  /** USDX-749 — "USD" untuk Transfer BNI, "IDR" lainnya. */
+  currency?: PayCurrency;
+  /** USDX-749 — Transfer BNI: USD yang ditransfer SEBELUM kode unik (USDX dipotong ke sen). Lainnya null. */
+  estimatedTotalPayUsd?: string | null;
+  /** USDX-749 — Transfer BNI: batas atas termasuk kode unik (+$0,99). Lainnya null. */
+  estimatedTotalPayMaxUsd?: string | null;
   /** Absen = true (backend lama). */
   available?: boolean;
   unavailableReason?: ChannelUnavailableReason | null;
@@ -92,19 +103,26 @@ export interface MintChannelOption {
   // tanpa field ini (adapter mock/BNI) berperilaku persis seperti sebelumnya.
   disabledBanks?: VaBank[];
   // ── Estimasi harga PER METODE (D25, `api/mint.yaml` ChannelOption) ─────────────────────────
-  // Kurs beli beda per metode (Transfer BNI = kurs BNI dari wondr; Virtual Account = dasar + Y%).
+  // Kurs beli beda per metode (Virtual Account = dasar + Y%). Transfer BNI sejak USDX-749 = transfer
+  // USD: tidak ada kurs BNI lagi (`effectiveRate` = kurs dasar, `rateUpdatedAt` null).
   // Semuanya ESTIMASI — `/pay` membaca ulang kurs lalu mengunci. Opsional: backend sebelum D25
   // tidak mengirimnya, dan pemilih metode jatuh ke perhitungan lama (total order + pgFee).
   rateAdjustmentPct?: string | null;
   effectiveRate?: string;
-  /** `BANK_TRANSFER`: kapan kurs BNI terakhir diperbarui admin. `VA`: null. */
+  /** Selalu null sejak USDX-749 (tidak ada lagi kurs BNI manual). */
   rateUpdatedAt?: string | null;
   subtotalIdr?: string;
   mintFeeIdr?: string;
   /** subtotal + mint fee + pg fee (floor). `BANK_TRANSFER`: BELUM termasuk kode unik. */
   estimatedTotalPayIdr?: string;
-  /** Rev-17 R8 — satu-satunya dasar penanda "Paling hemat". */
+  /** Rev-17 R8 — satu-satunya dasar penanda "Paling hemat" (Transfer BNI: padanan rupiahnya). */
   estimatedTotalPayMaxIdr?: string;
+  /** USDX-749 — "USD" untuk Transfer BNI, "IDR" lainnya. */
+  currency?: PayCurrency;
+  /** USDX-749 — Transfer BNI: USD yang ditransfer SEBELUM kode unik (USDX dipotong ke sen). Lainnya null. */
+  estimatedTotalPayUsd?: string | null;
+  /** USDX-749 — Transfer BNI: batas atas termasuk kode unik (+$0,99). Lainnya null. */
+  estimatedTotalPayMaxUsd?: string | null;
   /** Rev-17 — false = opsi tampil tapi tidak bisa dipilih untuk order ini. Absen = true. */
   available?: boolean;
   unavailableReason?: ChannelUnavailableReason | null;
@@ -138,11 +156,23 @@ export interface MintOrderDetail {
   paymentChannel: PaymentChannel | null;
   pgFeeIdr: string | null;
   totalFeeIdr: string | null;
+  /** Transfer BNI (USDX-749): padanan rupiah saja (USD × kurs dasar) — BUKAN angka yang ditransfer. */
   totalPayIdr: string | null;
   /**
-   * D25 — kode unik (001–999) yang SUDAH DITAMBAHKAN ke `totalPayIdr` (Transfer BNI saja).
-   * Ditampilkan sebagai keterangan "sudah termasuk kode unik Rp N", tanpa sorotan digit.
-   * Null untuk VA / sebelum /pay; absen di backend lama.
+   * USDX-749 — Transfer BNI: USD yang ditransfer PERSIS (dasar + kode unik sen), mis. "3.47". Sama
+   * dengan `amount` setelah /pay (seluruh sen di-mint). Null untuk metode lain / sebelum /pay.
+   */
+  totalPayUsd?: string | null;
+  /**
+   * USDX-749 — mata uang yang ditransfer: "USD" untuk Transfer BNI, "IDR" lainnya — termasuk order
+   * Transfer BNI rupiah dari sebelum peralihan (`totalPayUsd` null). Satu-satunya penentu mata uang
+   * nominal yang dibayar; jangan ditebak dari `paymentChannel`.
+   */
+  payCurrency?: PayCurrency;
+  /**
+   * Kode unik Transfer BNI yang SUDAH DITAMBAHKAN ke tagihan. Sejak USDX-749 dalam SEN USD (`"01"`–
+   * `"99"`, ditambahkan ke `totalPayUsd`). Ditampilkan sebagai keterangan "sudah termasuk kode unik
+   * $0,47", tanpa sorotan digit. Null untuk VA / sebelum /pay.
    */
   uniqueCode?: string | null;
   paymentBank: VaBank | null;

@@ -18,6 +18,21 @@ export function formatIDR(value: number): string {
   }).format(Math.floor(value))}`;
 }
 
+// Nominal USD untuk dibaca manusia, gaya id-ID dan SELALU dua desimal: "$3,47", "$1.234,50".
+// Dipakai Transfer BNI sejak jadi transfer USD (keputusan PM 14 Okt 2026, USDX-749): yang ditransfer
+// nasabah dan kode uniknya dalam SEN, jadi sen tidak boleh hilang ("$3" untuk tagihan $3,00 masih
+// benar, tapi "$3,5" untuk $3,50 terbaca seperti salah ketik). Nilai backend sudah 2 desimal — tidak
+// ada pembulatan yang mengubah angka tagihan.
+export function formatUSD(value: string | number | null | undefined): string {
+  if (value == null || value === "") return "—";
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `$${new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n)}`;
+}
+
 // Kurs per USDX untuk dibaca manusia: angka bulat tanpa desimal ("Rp 16.200"), selain itu tepat
 // dua desimal ("Rp 16.412,50"). Kurs TIDAK dibulatkan ke rupiah seperti `formatIDR` — membulatkan
 // 16.412,50 jadi 16.413 mengubah harga yang dipakai orang untuk memeriksa hitungannya sendiri.
