@@ -325,14 +325,18 @@ function QrisInstruction({
  * Instruksi Transfer BNI (D25 — `sot/phase-2/week2.md` § Checkout; tata letak desain PM 2 Okt 2026;
  * USD sejak keputusan PM 14 Okt 2026, USDX-749).
  *
- * Transfer BNI = transfer USD dari aplikasi wondr by BNI ke rekening USD BNI penampung. Urutannya:
- * NOMINAL (`totalPayUsd`, sudah termasuk kode unik sen — besar, bisa disalin), REKENING tujuan
- * (`virtualAccountNo` + `collectionAccountName`, dari backend), USDX yang diterima (`amount` = USD
- * yang ditransfer, kode unik ikut di-mint), lalu SISA WAKTU.
+ * Transfer BNI = transfer USD dari aplikasi wondr by BNI ke rekening USD BNI penampung. Ini SATU-
+ * SATUNYA layar yang menyebut nominal Transfer BNI. Urutannya: "Ketik di wondr: USD 3.54"
+ * (`totalPayUsd`, sudah termasuk kode unik sen — besar, bisa disalin), USDX yang diterima (`amount`
+ * = USD yang ditransfer, kode unik ikut di-mint), catatan kurs BNI + kode unik, REKENING tujuan
+ * (`virtualAccountNo` + `collectionAccountName`, dari backend) + syarat rekening atas nama sendiri,
+ * lalu SISA WAKTU.
  *
- * Kode unik ditulis sebagai keterangan "sudah termasuk kode unik $0,47" — TANPA sorotan digit.
- * `totalPayIdr` order ini cuma padanan rupiah dan tidak ditampilkan sebagai angka transfer. Nomor dan
- * nama rekening TIDAK ditulis di kode: backend mengirim rekening penampung environment-nya sendiri.
+ * Kode unik ditulis sebagai keterangan "Sen tambahan ($0,54) adalah kode unik…" — TANPA sorotan
+ * digit. Rupiah TIDAK PERNAH tampil sebagai angka (keputusan PM 14 Okt 2026): BNI memotong rupiah
+ * nasabah dengan kurs BNI sendiri, jadi `totalPayIdr` order ini cuma padanan dan bukan yang
+ * dipotong. Nomor dan nama rekening TIDAK ditulis di kode: backend mengirim rekening penampung
+ * environment-nya sendiri.
  */
 function BniTransferInstructions({
   order,
@@ -360,16 +364,16 @@ function BniTransferInstructions({
         <span className="text-sm font-medium text-foreground">{CHECKOUT_COPY.bniTransferTitle}</span>
       </div>
 
-      {/* 1 · Nominal (USD) */}
+      {/* 1 · Nominal (USD) — persis seperti diketik di kolom nominal wondr. */}
       {usdCopy !== null && (
         <div className="flex flex-col gap-1">
-          <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniExactAmountLabel}</p>
+          <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniTypeInWondrLabel}</p>
           <div className="flex items-center justify-between gap-2">
             <span
               data-testid="nominal-transfer-bni"
               className="text-3xl leading-9 font-semibold text-foreground tabular-nums"
             >
-              {formatUSD(usdCopy)}
+              {CHECKOUT_COPY.bniTypeInWondrAmount(usdCopy)}
             </span>
             <Button
               type="button"
@@ -381,15 +385,27 @@ function BniTransferInstructions({
               <Copy /> Salin
             </Button>
           </div>
-          {code !== null && (
-            <p className="text-xs text-muted-foreground" data-testid="kode-unik">
-              {CHECKOUT_COPY.bniIncludesUniqueCode(formatUSD(code))}
-            </p>
-          )}
         </div>
       )}
 
-      {/* 2 · Rekening tujuan */}
+      {/* 2 · Yang diterima — kode unik ikut di-mint, jadi USDX = USD yang ditransfer. */}
+      {usdCopy !== null && (
+        <p className="text-sm text-foreground" data-testid="terima-usdx-bni">
+          {CHECKOUT_COPY.bniYouReceive}{" "}
+          <span className="font-semibold">{formatTokenAmount(order.amount)} USDX</span>
+        </p>
+      )}
+
+      {/* Rupiah tidak pernah disebut angkanya: BNI memotong dengan kursnya sendiri. Kode unik
+          ditulis sebagai keterangan, TANPA sorotan digit. */}
+      <ul className="flex list-disc flex-col gap-1 pl-4 text-xs text-muted-foreground">
+        <li data-testid="catatan-rupiah-bni">{CHECKOUT_COPY.bniRupiahNote}</li>
+        {code !== null && (
+          <li data-testid="kode-unik">{CHECKOUT_COPY.bniUniqueCodeNote(formatUSD(code))}</li>
+        )}
+      </ul>
+
+      {/* 3 · Rekening tujuan */}
       <div className="flex flex-col gap-1">
         <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.bniAccountLabel}</p>
         <div className="flex items-center justify-between gap-2">
@@ -419,15 +435,11 @@ function BniTransferInstructions({
             <Copy /> Salin
           </Button>
         </div>
-      </div>
-
-      {/* 3 · Yang diterima — kode unik ikut di-mint, jadi USDX = USD yang ditransfer. */}
-      {usdCopy !== null && (
-        <p className="text-sm text-foreground" data-testid="terima-usdx-bni">
-          {CHECKOUT_COPY.bniYouReceive}{" "}
-          <span className="font-semibold">{formatTokenAmount(order.amount)} USDX</span>
+        {/* Nama pengirim dicocokkan dengan nama pemilik akun USDX. */}
+        <p data-testid="rekening-sendiri-bni" className="text-xs text-muted-foreground">
+          {CHECKOUT_COPY.bniOwnAccountNote}
         </p>
-      )}
+      </div>
 
       {/* 4 · Sisa waktu */}
       {countdown && (

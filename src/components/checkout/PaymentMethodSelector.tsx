@@ -5,16 +5,18 @@
 // Bentuk mengikuti desain PM 2 Okt 2026 (D25 — `sot/phase-2/week2.md` § Checkout,
 // `sot/bni-integration.md` §4.3), disambungkan ke kontrak rev-16/17:
 //
-//  1. DAFTAR — tiap baris cuma NAMA metode + SATU angka total. "Paling hemat" hanya menempel di
+//  1. DAFTAR — tiap baris cuma NAMA metode + SATU angka total (Transfer BNI: tanpa angka, lihat bawah). "Paling hemat" hanya menempel di
 //     opsi yang `estimatedTotalPayMaxIdr`-nya benar-benar terkecil (rev-17 R8: total TERMASUK kode
 //     unik, Transfer BNI +999 sebelum /pay). Tidak ada penanda tetap untuk metode tertentu.
 //  2. DETAIL membuka di bawah opsi yang diketuk: Transfer BNI → transfer USD dari wondr; Virtual
 //     Account → pilih bank (biaya per bank dari `bankOptions[]`). Lalu rincian harga metode itu.
-//  3. Tombol utama menyebut angkanya: "Bayar Rp X" (Transfer BNI: "Bayar $X").
+//  3. Tombol utama menyebut angkanya: "Bayar Rp X" (Transfer BNI: "Lanjut, lihat nominal transfer").
 //
-// Transfer BNI = transfer USD (keputusan PM 14 Okt 2026, USDX-749): angkanya `estimatedTotalPayUsd`
-// (USDX dipotong ke sen, BELUM termasuk kode unik maks. $0,99), tanpa kurs dan tanpa rincian rupiah.
-// "Paling hemat" tetap dinilai dalam rupiah lewat `estimatedTotalPayMaxIdr` (padanan rupiahnya).
+// Transfer BNI = transfer USD dari wondr (keputusan PM 14 Okt 2026, USDX-749). BNI memotong rupiah
+// nasabah dengan kurs BNI sendiri yang tidak kita ketahui, dan kode unik sen baru dibuat saat /pay —
+// jadi sebelum /pay Transfer BNI DIDESKRIPSIKAN, tidak diberi harga: tanpa angka rupiah, tanpa
+// angka USD, tanpa kurs. Nominalnya baru tampil di halaman instruksi. "Paling hemat" tetap dinilai
+// dalam rupiah lewat `estimatedTotalPayMaxIdr` (padanan rupiah dari backend).
 //
 // TIDAK ADA kartu statis dan TIDAK ADA urutan yang dipatok di sini. Daftar metode, urutannya, dan
 // biayanya diatur admin dari back-office (`payment_methods`, rev-16 §4.3.11) dan sampai ke sini
@@ -36,7 +38,7 @@ import { CHECKOUT_COPY, TOTAL_LABEL } from "@/lib/checkout/copy";
 import { Button } from "@/components/ui/button";
 import { CardChoice } from "@/components/ui/card-choice";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { formatIDR, formatRate, formatUSD, cn } from "@/lib/utils";
+import { formatIDR, formatRate, cn } from "@/lib/utils";
 
 /** Channel yang bisa digambar halaman ini. Kontrak menyatakan enum `PaymentChannel` terbuka —
  *  channel yang tak dikenal TIDAK ditawarkan: tombol bayar untuk instrumen yang instruksinya
@@ -54,15 +56,6 @@ function num(v: string | null | undefined): number | null {
 /** Absen = tersedia (backend sebelum rev-17 tidak mengirim field ini). */
 function isAvailable(o: { available?: boolean }): boolean {
   return o.available !== false;
-}
-
-/**
- * Transfer BNI: USD yang ditransfer sebelum kode unik (`estimatedTotalPayUsd`), atau null kalau
- * backend tak mengirimnya. Tidak ada jalan pulang ke rupiah: angka rupiahnya cuma padanan, bukan
- * yang ditransfer nasabah.
- */
-function bniUsdEstimate(option: MintChannelOption): string | null {
-  return num(option.estimatedTotalPayUsd) === null ? null : option.estimatedTotalPayUsd!;
 }
 
 function channelTitle(channel: PaymentChannel): string {
@@ -342,15 +335,11 @@ export function PaymentMethodSelector({
     ? priceOf(selectedOption, legacy, effectiveBank ? bankOptionOf(effectiveBank) : null)
     : null;
 
-  const selectedBniUsd =
-    selectedOption?.channel === "BANK_TRANSFER" ? bniUsdEstimate(selectedOption) : null;
   const payLabel =
     selectedPrice === null
       ? CHECKOUT_COPY.pickMethodCta
       : selectedOption?.channel === "BANK_TRANSFER"
-        ? selectedBniUsd !== null
-          ? CHECKOUT_COPY.payAmountCta(formatUSD(selectedBniUsd))
-          : CHECKOUT_COPY.payCta
+        ? CHECKOUT_COPY.bniContinueCta
         : selectedPrice.total !== null
           ? CHECKOUT_COPY.payAmountCta(formatIDR(selectedPrice.total))
           : CHECKOUT_COPY.payCta;
@@ -367,18 +356,7 @@ export function PaymentMethodSelector({
         className="flex flex-col gap-3 rounded-lg bg-muted p-3 min-[544px]:p-4"
       >
         {ch === "BANK_TRANSFER" && (
-          <>
-            <p className="text-sm text-foreground">{CHECKOUT_COPY.bniUsdMethodNote}</p>
-            <div className="flex flex-col gap-2 border-t border-border pt-3">
-              <FeeRow
-                label={TOTAL_LABEL}
-                value={formatUSD(bniUsdEstimate(option))}
-                strong
-              />
-              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.uniqueCodeEstimateNote}</p>
-              <p className="text-xs text-muted-foreground">{CHECKOUT_COPY.estimateNote}</p>
-            </div>
-          </>
+          <p className="text-sm text-foreground">{CHECKOUT_COPY.bniDetailNote}</p>
         )}
 
         {ch === "QRIS" && <p className="text-sm text-foreground">{CHECKOUT_COPY.qrisDescription}</p>}
@@ -495,8 +473,8 @@ export function PaymentMethodSelector({
             const ch = opt.channel;
             const available = isAvailable(opt);
             const total = priceOf(opt, legacy).total;
-            const bniUsd = ch === "BANK_TRANSFER" ? bniUsdEstimate(opt) : null;
             const isOpen = selectedChannel === ch;
+            const unpriced = available && ch === "BANK_TRANSFER";
             return (
               <div key={ch} className="flex flex-col gap-2">
                 <CardChoice
@@ -505,33 +483,37 @@ export function PaymentMethodSelector({
                   title={channelTitle(ch)}
                   // Opsi aktif yang tidak bisa dipakai UNTUK ORDER INI tampil non-aktif beserta
                   // alasannya (rev-17) — disembunyikan, orang mengira metodenya tidak ada.
-                  description={available ? undefined : unavailableText(opt)}
+                  // Transfer BNI dideskripsikan, tidak diberi harga (keputusan PM 14 Okt 2026).
+                  description={
+                    !available
+                      ? unavailableText(opt)
+                      : ch === "BANK_TRANSFER"
+                        ? CHECKOUT_COPY.bniMethodSubtitle
+                        : undefined
+                  }
                   disabled={!available}
                   icon={channelIcon(ch)}
                   trailing={
+                    // Transfer BNI tersedia: kolom kanan TANPA angka — nominalnya belum diketahui
+                    // sebelum kode unik dibuat, dan rupiahnya ikut kurs BNI. Tinggal badge-nya.
+                    unpriced && cheapest !== ch ? undefined : (
                     <span className="flex flex-col items-end gap-1">
-                      <span className="text-sm font-semibold whitespace-nowrap text-foreground tabular-nums">
-                        {!available
-                          ? CHECKOUT_COPY.unavailableBadge
-                          : ch === "BANK_TRANSFER"
-                            ? formatUSD(bniUsd)
+                      {!unpriced && (
+                        <span className="text-sm font-semibold whitespace-nowrap text-foreground tabular-nums">
+                          {!available
+                            ? CHECKOUT_COPY.unavailableBadge
                             : total === null
                               ? "—"
                               : bankFeesVary(opt)
                                 ? `mulai ${formatIDR(total)}`
                                 : formatIDR(total)}
-                      </span>
-                      {/* Estimasi USD belum memuat kode unik sen — batas atasnya disebut di
-                          tempat angkanya, bukan baru di detail. */}
-                      {available && bniUsd !== null && (
-                        <span className="text-[11px] leading-none whitespace-nowrap text-muted-foreground">
-                          {CHECKOUT_COPY.bniUniqueCodeMaxNote}
                         </span>
                       )}
                       {cheapest === ch && (
                         <Badge tone="success">{CHECKOUT_COPY.cheapestBadge}</Badge>
                       )}
                     </span>
+                    )
                   }
                 />
                 {isOpen && detail(opt)}
