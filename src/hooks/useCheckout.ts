@@ -21,9 +21,18 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { exchangeHandoffCode } from "@/lib/api/auth";
-import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
+import {
+  isApiError,
+  isValidationError,
+  isRateLimited,
+  getRateLimitSeconds,
+} from "@/lib/api/errors";
 import { isOrderIdWellFormed } from "@/lib/checkout/order-id";
-import { readHandoffCodeFromHash, setToken, clearToken } from "@/lib/auth/token";
+import {
+  readHandoffCodeFromHash,
+  setToken,
+  clearToken,
+} from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
@@ -58,9 +67,15 @@ function payErrorMessage(error: unknown): string | null {
   // 429 RATE_LIMITED → toast throttle global (Providers, USDX-252); jangan
   // tampilkan error inline (akan kebaca sebagai kegagalan generic).
   if (isRateLimited(error)) return null;
+  // USDX-749 anti-dobel — hasilnya BELUM diketahui, bukan gagal: /pay lain untuk pesanan ini masih
+  // jalan, atau koneksi putus sebelum jawaban tiba. Server bisa saja sudah membuat tagihannya.
+  if (isPayOutcomeUnknown(error)) return PAY_CHECKING_MESSAGE;
   if (isApiError(error)) {
+    // Bukan "tunggu kedaluwarsa": pesanan bisa saja SUDAH punya tagihan yang sah (percobaan
+    // sebelumnya berhasil tapi jawabannya hilang). Halaman memuat ulang statusnya — kalau tagihan
+    // ada, rincian bayarnya yang tampil.
     if (error.code === "INVALID_ORDER_STATE")
-      return "Pesanan tidak lagi bisa memilih metode. Tunggu kedaluwarsa, lalu mulai ulang dari /mint.";
+      return "Pesanan ini tidak lagi bisa memilih metode. Status terbarunya sedang dimuat ulang.";
     // D25/rev-16/17: `/pay` menghitung ulang dengan kurs + biaya terbaru dan bisa menolak metode
     // yang barusan dimatikan admin, total di atas batas metode, atau aturan Rupiah lain — order
     // TETAP `REQUESTED`, jadi nasabah boleh memilih metode lain (daftar dimuat ulang di bawah).
@@ -69,10 +84,27 @@ function payErrorMessage(error: unknown): string | null {
     // Rev-17 R1/R2: tak ada kode unik Transfer BNI yang bebas untuk nominal ini.
     if (error.code === "UNIQUE_CODE_EXHAUSTED")
       return "Transfer BNI sedang penuh untuk nominal ini. Pilih Virtual Account atau coba lagi nanti.";
-    if (error.code === "MINT_DISABLED") return "Mint belum dibuka di environment ini.";
+    if (error.code === "MINT_DISABLED")
+      return "Mint belum dibuka di environment ini.";
   }
   return "Gagal memproses pembayaran. Silakan coba lagi.";
 }
+
+export const PAY_CHECKING_MESSAGE =
+  "Masih memastikan pembayaranmu. Kalau sudah berhasil, rincian bayar muncul di sini sebentar lagi — menekan Bayar lagi tidak membuat tagihan kedua.";
+
+/**
+ * USDX-749 anti-dobel — /pay yang hasilnya belum diketahui: `409 PAYMENT_IN_PROGRESS` (/pay lain
+ * untuk pesanan ini masih berjalan) atau galat jaringan tanpa jawaban server (`fetch` melempar
+ * sebelum ada status). Dua-duanya: tagihannya mungkin sudah ada.
+ */
+function isPayOutcomeUnknown(error: unknown): boolean {
+  if (isApiError(error)) return error.code === "PAYMENT_IN_PROGRESS";
+  return error instanceof TypeError;
+}
+
+/** Berapa lama halaman terus memeriksa setelah /pay yang hasilnya belum diketahui. */
+const PAY_CONFIRM_WINDOW_MS = 60_000;
 
 export function useCheckout(id: string) {
   const queryClient = useQueryClient();
@@ -128,6 +160,11 @@ export function useCheckout(id: string) {
   const waitingForExchange = needsExchange && exchange.isPending;
   const exchangeFailed = needsExchange && exchange.isError;
 
+  // USDX-749 anti-dobel — sampai kapan halaman memeriksa ulang setelah /pay yang hasilnya belum
+  // diketahui. Polling biasa tidak berjalan selama REQUESTED, jadi tanpa ini tagihan yang ternyata
+  // sudah dibuat server tidak akan pernah tampil.
+  const [confirmPayUntil, setConfirmPayUntil] = useState<number | null>(null);
+
   const query = useQuery({
     queryKey: ["mint-order", id],
     queryFn: () => getMintOrder(id),
@@ -136,13 +173,24 @@ export function useCheckout(id: string) {
     refetchInterval: (q) => {
       const o = q.state.data;
       if (!o || TERMINAL.has(o.status)) return false;
+      if (
+        o.paymentStatus === "REQUESTED" &&
+        confirmPayUntil !== null &&
+        Date.now() < confirmPayUntil
+      ) {
+        return POLL_MS;
+      }
       // `expiresAt` = batas jendela BAYAR. Order yang sudah PAID lewat batas itu bukan expired —
       // ia sedang menunggu persetujuan multisig yang bisa berjam-jam. Kalau polling ikut berhenti
       // di situ, halaman tak akan pernah tahu order sudah COMPLETED (Tugas 6 poin 2/3).
       // `HELD` ikut dikecualikan bersama `PAID`: order jadi HELD justru lewat transfer TELAT
       // (pasca-`EXPIRED`, `sot/bni-integration.md §6`), jadi batas bayarnya memang sudah lewat.
       // Menghentikan polling di situ membuat layarnya basi selamanya.
-      if (o.paymentStatus !== "PAID" && o.paymentStatus !== "HELD" && new Date(o.expiresAt).getTime() <= Date.now())
+      if (
+        o.paymentStatus !== "PAID" &&
+        o.paymentStatus !== "HELD" &&
+        new Date(o.expiresAt).getTime() <= Date.now()
+      )
         return false;
       // Poll selama menunggu konfirmasi pembayaran / settlement on-chain / putusan ops atas
       // kredit yang ditahan. HELD menunggu MANUSIA (antrean "Mint Bermasalah"), dan hasilnya —
@@ -210,7 +258,10 @@ export function useCheckout(id: string) {
 
   const isTerminal = order ? TERMINAL.has(order.status) : false;
   const secondsLeft = order
-    ? Math.max(0, Math.floor((new Date(order.expiresAt).getTime() - now) / 1000))
+    ? Math.max(
+        0,
+        Math.floor((new Date(order.expiresAt).getTime() - now) / 1000),
+      )
     : 0;
   // Sudah dibayar = jendela bayar tak berlaku lagi; layar "Pesanan kedaluwarsa" untuk user yang
   // sudah transfer adalah kebohongan yang bikin panik. Selain itu, hormati juga EXPIRED dari
@@ -223,8 +274,10 @@ export function useCheckout(id: string) {
     (order!.paymentStatus === "EXPIRED" || secondsLeft <= 0);
 
   const payMutation = useMutation({
-    mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) => payMintOrder(id, vars),
+    mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) =>
+      payMintOrder(id, vars),
     onSuccess: (updated) => {
+      setConfirmPayUntil(null);
       queryClient.setQueryData(["mint-order", id], updated);
     },
     // Penolakan /pay yang membiarkan order `REQUESTED` (422 / 503) berarti `channels[]` yang
@@ -233,6 +286,15 @@ export function useCheckout(id: string) {
     // REQUESTED, jadi tanpa ini layar terus menawarkan pilihan yang barusan ditolak.
     onError: (error) => {
       if (isApiError(error) && (error.status === 422 || error.status === 503)) {
+        void queryClient.invalidateQueries({ queryKey: ["mint-order", id] });
+      }
+      // USDX-749 anti-dobel — sudah terkunci (bisa jadi oleh percobaan kita sendiri yang jawabannya
+      // hilang): muat ulang sekali, supaya tagihan yang sudah ada yang tampil, bukan daftar metode.
+      if (isApiError(error) && error.code === "INVALID_ORDER_STATE") {
+        void queryClient.invalidateQueries({ queryKey: ["mint-order", id] });
+      }
+      if (isPayOutcomeUnknown(error)) {
+        setConfirmPayUntil(Date.now() + PAY_CONFIRM_WINDOW_MS);
         void queryClient.invalidateQueries({ queryKey: ["mint-order", id] });
       }
     },
