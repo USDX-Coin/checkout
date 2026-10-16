@@ -21,18 +21,9 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMintOrder, payMintOrder } from "@/lib/api/mint";
 import { exchangeHandoffCode } from "@/lib/api/auth";
-import {
-  isApiError,
-  isValidationError,
-  isRateLimited,
-  getRateLimitSeconds,
-} from "@/lib/api/errors";
+import { isApiError, isValidationError, isRateLimited, getRateLimitSeconds } from "@/lib/api/errors";
 import { isOrderIdWellFormed } from "@/lib/checkout/order-id";
-import {
-  readHandoffCodeFromHash,
-  setToken,
-  clearToken,
-} from "@/lib/auth/token";
+import { readHandoffCodeFromHash, setToken, clearToken } from "@/lib/auth/token";
 import { redirectToApp } from "@/lib/auth/redirect";
 import type { MintOrderDetail, PaymentChannel, VaBank } from "@/types";
 
@@ -84,8 +75,7 @@ function payErrorMessage(error: unknown): string | null {
     // Rev-17 R1/R2: tak ada kode unik Transfer BNI yang bebas untuk nominal ini.
     if (error.code === "UNIQUE_CODE_EXHAUSTED")
       return "Transfer BNI sedang penuh untuk nominal ini. Pilih Virtual Account atau coba lagi nanti.";
-    if (error.code === "MINT_DISABLED")
-      return "Mint belum dibuka di environment ini.";
+    if (error.code === "MINT_DISABLED") return "Mint belum dibuka di environment ini.";
   }
   return "Gagal memproses pembayaran. Silakan coba lagi.";
 }
@@ -173,11 +163,7 @@ export function useCheckout(id: string) {
     refetchInterval: (q) => {
       const o = q.state.data;
       if (!o || TERMINAL.has(o.status)) return false;
-      if (
-        o.paymentStatus === "REQUESTED" &&
-        confirmPayUntil !== null &&
-        Date.now() < confirmPayUntil
-      ) {
+      if (o.paymentStatus === "REQUESTED" && confirmPayUntil !== null && Date.now() < confirmPayUntil) {
         return POLL_MS;
       }
       // `expiresAt` = batas jendela BAYAR. Order yang sudah PAID lewat batas itu bukan expired —
@@ -186,11 +172,7 @@ export function useCheckout(id: string) {
       // `HELD` ikut dikecualikan bersama `PAID`: order jadi HELD justru lewat transfer TELAT
       // (pasca-`EXPIRED`, `sot/bni-integration.md §6`), jadi batas bayarnya memang sudah lewat.
       // Menghentikan polling di situ membuat layarnya basi selamanya.
-      if (
-        o.paymentStatus !== "PAID" &&
-        o.paymentStatus !== "HELD" &&
-        new Date(o.expiresAt).getTime() <= Date.now()
-      )
+      if (o.paymentStatus !== "PAID" && o.paymentStatus !== "HELD" && new Date(o.expiresAt).getTime() <= Date.now())
         return false;
       // Poll selama menunggu konfirmasi pembayaran / settlement on-chain / putusan ops atas
       // kredit yang ditahan. HELD menunggu MANUSIA (antrean "Mint Bermasalah"), dan hasilnya —
@@ -258,10 +240,7 @@ export function useCheckout(id: string) {
 
   const isTerminal = order ? TERMINAL.has(order.status) : false;
   const secondsLeft = order
-    ? Math.max(
-        0,
-        Math.floor((new Date(order.expiresAt).getTime() - now) / 1000),
-      )
+    ? Math.max(0, Math.floor((new Date(order.expiresAt).getTime() - now) / 1000))
     : 0;
   // Sudah dibayar = jendela bayar tak berlaku lagi; layar "Pesanan kedaluwarsa" untuk user yang
   // sudah transfer adalah kebohongan yang bikin panik. Selain itu, hormati juga EXPIRED dari
@@ -274,8 +253,7 @@ export function useCheckout(id: string) {
     (order!.paymentStatus === "EXPIRED" || secondsLeft <= 0);
 
   const payMutation = useMutation({
-    mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) =>
-      payMintOrder(id, vars),
+    mutationFn: (vars: { channel: PaymentChannel; bank?: VaBank | null }) => payMintOrder(id, vars),
     onSuccess: (updated) => {
       setConfirmPayUntil(null);
       queryClient.setQueryData(["mint-order", id], updated);

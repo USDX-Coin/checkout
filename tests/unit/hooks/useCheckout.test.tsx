@@ -1,10 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  renderHook,
-  act,
-  waitFor,
-  createWrapper,
-} from "../../helpers/test-utils";
+import { renderHook, act, waitFor, createWrapper } from "../../helpers/test-utils";
 import { CHECKOUT_TOKEN_KEY, setToken } from "@/lib/auth/token";
 import type { MintOrderDetail } from "@/types";
 
@@ -78,11 +73,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   mockRedirect.mockReset();
   sessionStorage.clear();
-  window.history.replaceState(
-    null,
-    "",
-    "/checkout/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012",
-  );
+  window.history.replaceState(null, "", "/checkout/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012");
 });
 
 afterEach(() => {
@@ -98,15 +89,11 @@ function routeFetch(handlers: {
     if (url.includes("/auth/checkout-token/exchange")) {
       return Promise.resolve(
         handlers.exchange?.() ??
-          jsonResponse(200, {
-            status: "success",
-            data: { token: "sess-default" },
-          }),
+          jsonResponse(200, { status: "success", data: { token: "sess-default" } }),
       );
     }
     return Promise.resolve(
-      handlers.mint?.(init) ??
-        jsonResponse(200, { status: "success", data: makeOrder() }),
+      handlers.mint?.(init) ?? jsonResponse(200, { status: "success", data: makeOrder() }),
     );
   };
 }
@@ -122,19 +109,12 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
     window.location.hash = "#code=hc-baru";
     fetchMock.mockImplementation(
       routeFetch({
-        exchange: () =>
-          jsonResponse(200, {
-            status: "success",
-            data: { token: "sess-baru" },
-          }),
+        exchange: () => jsonResponse(200, { status: "success", data: { token: "sess-baru" } }),
         mint: () => jsonResponse(200, { status: "success", data: makeOrder() }),
       }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     // Exchange TETAP dipanggil meski sessionStorage sudah berisi token.
@@ -146,13 +126,9 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
 
     // GET memakai token BARU, bukan yang lama.
     const getCall = fetchMock.mock.calls.find(
-      ([u, i]) =>
-        (u as string).includes("/mint/0198f2c4") &&
-        (i as RequestInit)?.method === "GET",
+      ([u, i]) => (u as string).includes("/mint/0198f2c4") && (i as RequestInit)?.method === "GET",
     );
-    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe(
-      "Bearer sess-baru",
-    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-baru");
     expect(window.sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBe("sess-baru");
   });
 
@@ -160,46 +136,31 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
     setToken("sess-tersimpan");
     window.location.hash = "";
     fetchMock.mockImplementation(
-      routeFetch({
-        mint: () => jsonResponse(200, { status: "success", data: makeOrder() }),
-      }),
+      routeFetch({ mint: () => jsonResponse(200, { status: "success", data: makeOrder() }) }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     expect(
-      fetchMock.mock.calls.some(([u]) =>
-        (u as string).includes("/auth/checkout-token/exchange"),
-      ),
+      fetchMock.mock.calls.some(([u]) => (u as string).includes("/auth/checkout-token/exchange")),
     ).toBe(false);
     const getCall = fetchMock.mock.calls.find(
-      ([u, i]) =>
-        (u as string).includes("/mint/0198f2c4") &&
-        (i as RequestInit)?.method === "GET",
+      ([u, i]) => (u as string).includes("/mint/0198f2c4") && (i as RequestInit)?.method === "GET",
     );
-    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe(
-      "Bearer sess-tersimpan",
-    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-tersimpan");
   });
 
   test("exchanges #code before the first GET → GET carries the exchanged session token; code stripped, not persisted", async () => {
     window.location.hash = "#code=hc-1";
     fetchMock.mockImplementation(
       routeFetch({
-        exchange: () =>
-          jsonResponse(200, { status: "success", data: { token: "sess-1" } }),
+        exchange: () => jsonResponse(200, { status: "success", data: { token: "sess-1" } }),
         mint: () => jsonResponse(200, { status: "success", data: makeOrder() }),
       }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     // Exchange dipanggil: POST { code }, pre-auth (tanpa Authorization).
@@ -208,19 +169,13 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
     );
     expect(exchangeCall?.[1].method).toBe("POST");
     expect(exchangeCall?.[1].body).toBe(JSON.stringify({ code: "hc-1" }));
-    expect(
-      (exchangeCall?.[1].headers as Headers).get("Authorization"),
-    ).toBeNull();
+    expect((exchangeCall?.[1].headers as Headers).get("Authorization")).toBeNull();
 
     // GET mint memakai token hasil exchange sebagai bearer (anti-race).
     const getCall = fetchMock.mock.calls.find(
-      ([u, i]) =>
-        (u as string).includes("/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012") &&
-        (i as RequestInit)?.method === "GET",
+      ([u, i]) => (u as string).includes("/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012") && (i as RequestInit)?.method === "GET",
     );
-    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe(
-      "Bearer sess-1",
-    );
+    expect((getCall?.[1].headers as Headers).get("Authorization")).toBe("Bearer sess-1");
 
     // Code di-strip dari URL; hanya session token yang tersimpan (bukan code).
     expect(window.location.hash).toBe("");
@@ -234,25 +189,17 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
         exchange: () =>
           jsonResponse(401, {
             status: "error",
-            error: {
-              code: "INVALID_HANDOFF_CODE",
-              message: "kode tidak valid",
-            },
+            error: { code: "INVALID_HANDOFF_CODE", message: "kode tidak valid" },
           }),
       }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isUnauthorized).toBe(true));
     expect(mockRedirect).toHaveBeenCalled();
 
     // Sesi tak valid → jangan sentuh GET mint sama sekali.
-    const hitMint = fetchMock.mock.calls.some(([u]) =>
-      (u as string).includes("/mint/"),
-    );
+    const hitMint = fetchMock.mock.calls.some(([u]) => (u as string).includes("/mint/"));
     expect(hitMint).toBe(false);
     expect(sessionStorage.getItem(CHECKOUT_TOKEN_KEY)).toBeNull();
   });
@@ -261,10 +208,7 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
     setToken("sess-kept");
     fetchMock.mockImplementation(routeFetch({}));
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     // Tak ada panggilan exchange (sudah authed).
@@ -273,24 +217,16 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
     );
     expect(exchanged).toBe(false);
     const [, init] = fetchMock.mock.calls[0];
-    expect((init.headers as Headers).get("Authorization")).toBe(
-      "Bearer sess-kept",
-    );
+    expect((init.headers as Headers).get("Authorization")).toBe("Bearer sess-kept");
   });
 
   test("mint GET 401 (session token dicabut/kedaluwarsa mid-sesi) → isUnauthorized + redirect", async () => {
     setToken("sess-x");
     fetchMock.mockResolvedValue(
-      jsonResponse(401, {
-        status: "error",
-        error: { code: "UNAUTHORIZED", message: "no session" },
-      }),
+      jsonResponse(401, { status: "error", error: { code: "UNAUTHORIZED", message: "no session" } }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isUnauthorized).toBe(true));
     expect(mockRedirect).toHaveBeenCalled();
   });
@@ -298,16 +234,10 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
   test("a 404 does NOT trigger the app redirect (order bukan milik user)", async () => {
     setToken("sess-x");
     fetchMock.mockResolvedValue(
-      jsonResponse(404, {
-        status: "error",
-        error: { code: "NOT_FOUND", message: "nope" },
-      }),
+      jsonResponse(404, { status: "error", error: { code: "NOT_FOUND", message: "nope" } }),
     );
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.isUnauthorized).toBe(false);
     expect(mockRedirect).not.toHaveBeenCalled();
@@ -316,13 +246,8 @@ describe("useCheckout — auth exchange (USDX-378)", () => {
 
 describe("useCheckout — baseline (behavior yang harus tetap, characterization)", () => {
   test("loads the order; future expiresAt → not expired, countdown > 0", async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(200, { status: "success", data: makeOrder() }),
-    );
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
     expect(result.current.isExpired).toBe(false);
     expect(result.current.secondsLeft).toBeGreaterThan(0);
@@ -332,15 +257,10 @@ describe("useCheckout — baseline (behavior yang harus tetap, characterization)
     fetchMock.mockResolvedValue(
       jsonResponse(200, {
         status: "success",
-        data: makeOrder({
-          expiresAt: new Date(Date.now() - 1000).toISOString(),
-        }),
+        data: makeOrder({ expiresAt: new Date(Date.now() - 1000).toISOString() }),
       }),
     );
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
     expect(result.current.isExpired).toBe(true);
   });
@@ -349,17 +269,10 @@ describe("useCheckout — baseline (behavior yang harus tetap, characterization)
     fetchMock.mockResolvedValue(
       jsonResponse(200, {
         status: "success",
-        data: makeOrder({
-          status: "COMPLETED",
-          paymentStatus: "PAID",
-          safeStatus: "EXECUTED",
-        }),
+        data: makeOrder({ status: "COMPLETED", paymentStatus: "PAID", safeStatus: "EXECUTED" }),
       }),
     );
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
     expect(result.current.isTerminal).toBe(true);
   });
@@ -379,33 +292,20 @@ describe("useCheckout — baseline (behavior yang harus tetap, characterization)
           }),
         );
       }
-      return Promise.resolve(
-        jsonResponse(200, { status: "success", data: makeOrder() }),
-      );
+      return Promise.resolve(jsonResponse(200, { status: "success", data: makeOrder() }));
     });
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     await act(async () => {
       await result.current.pay("VA", "BCA");
     });
 
-    const payCall = fetchMock.mock.calls.find(
-      ([, init]) => init?.method === "POST",
-    );
-    expect(payCall?.[0]).toContain(
-      "/api/v2/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012/pay",
-    );
-    expect(payCall?.[1].body).toBe(
-      JSON.stringify({ channel: "VA", bank: "BCA" }),
-    );
-    await waitFor(() =>
-      expect(result.current.order?.virtualAccountNo).toBe("8808123456"),
-    );
+    const payCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(payCall?.[0]).toContain("/api/v2/mint/0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012/pay");
+    expect(payCall?.[1].body).toBe(JSON.stringify({ channel: "VA", bank: "BCA" }));
+    await waitFor(() => expect(result.current.order?.virtualAccountNo).toBe("8808123456"));
   });
 
   test("pay() on a non-REQUESTED order surfaces a mapped payError", async () => {
@@ -418,26 +318,17 @@ describe("useCheckout — baseline (behavior yang harus tetap, characterization)
           }),
         );
       }
-      return Promise.resolve(
-        jsonResponse(200, { status: "success", data: makeOrder() }),
-      );
+      return Promise.resolve(jsonResponse(200, { status: "success", data: makeOrder() }));
     });
 
-    const { result } = renderHook(
-      () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-      { wrapper: createWrapper() },
-    );
+    const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.order).not.toBeNull());
 
     await act(async () => {
       await result.current.pay("QRIS").catch(() => {});
     });
 
-    await waitFor(() =>
-      expect(result.current.payError).toContain(
-        "tidak lagi bisa memilih metode",
-      ),
-    );
+    await waitFor(() => expect(result.current.payError).toContain("tidak lagi bisa memilih metode"));
   });
 });
 
@@ -461,16 +352,10 @@ describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)",
   describe("positive", () => {
     test("PAID lewat expiresAt → BUKAN expired", async () => {
       fetchMock.mockImplementation(
-        routeFetch({
-          mint: () =>
-            jsonResponse(200, { status: "success", data: paidPastWindow() }),
-        }),
+        routeFetch({ mint: () => jsonResponse(200, { status: "success", data: paidPastWindow() }) }),
       );
 
-      const { result } = renderHook(
-        () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-        { wrapper: createWrapper() },
-      );
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       expect(result.current.isExpired).toBe(false);
@@ -482,24 +367,16 @@ describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)",
         routeFetch({
           mint: () => {
             hits += 1;
-            return jsonResponse(200, {
-              status: "success",
-              data: paidPastWindow(),
-            });
+            return jsonResponse(200, { status: "success", data: paidPastWindow() });
           },
         }),
       );
 
-      const { result } = renderHook(
-        () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-        { wrapper: createWrapper() },
-      );
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       const afterFirst = hits;
-      await waitFor(() => expect(hits).toBeGreaterThan(afterFirst), {
-        timeout: 6000,
-      });
+      await waitFor(() => expect(hits).toBeGreaterThan(afterFirst), { timeout: 6000 });
       expect(result.current.isExpired).toBe(false);
     }, 10_000);
   });
@@ -511,18 +388,12 @@ describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)",
           mint: () =>
             jsonResponse(200, {
               status: "success",
-              data: makeOrder({
-                paymentStatus: "WAITING_FOR_PAYMENT",
-                expiresAt: LEWAT,
-              }),
+              data: makeOrder({ paymentStatus: "WAITING_FOR_PAYMENT", expiresAt: LEWAT }),
             }),
         }),
       );
 
-      const { result } = renderHook(
-        () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-        { wrapper: createWrapper() },
-      );
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       expect(result.current.isExpired).toBe(true);
@@ -544,10 +415,7 @@ describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)",
         }),
       );
 
-      const { result } = renderHook(
-        () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-        { wrapper: createWrapper() },
-      );
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       expect(result.current.isExpired).toBe(true);
@@ -570,10 +438,7 @@ describe("useCheckout — order sudah dibayar vs jendela bayar habis (Tugas 6)",
         }),
       );
 
-      const { result } = renderHook(
-        () => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"),
-        { wrapper: createWrapper() },
-      );
+      const { result } = renderHook(() => useCheckout("0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
 
       expect(result.current.isExpired).toBe(false);
@@ -593,14 +458,9 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
     test("404 → not-found", async () => {
       setToken("sess-x");
       fetchMock.mockResolvedValue(
-        jsonResponse(404, {
-          status: "error",
-          error: { code: "NOT_FOUND", message: "nope" },
-        }),
+        jsonResponse(404, { status: "error", error: { code: "NOT_FOUND", message: "nope" } }),
       );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.errorKind).toBe("not-found");
     });
@@ -608,14 +468,9 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
     test("500 → unavailable (bukan 'tidak ditemukan')", async () => {
       setToken("sess-x");
       fetchMock.mockResolvedValue(
-        jsonResponse(500, {
-          status: "error",
-          error: { code: "INTERNAL", message: "boom" },
-        }),
+        jsonResponse(500, { status: "error", error: { code: "INTERNAL", message: "boom" } }),
       );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.errorKind).toBe("unavailable");
     });
@@ -623,9 +478,7 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
     test("jaringan mati → unavailable", async () => {
       setToken("sess-x");
       fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.errorKind).toBe("unavailable");
     });
@@ -633,22 +486,15 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
     test("retry() memicu GET ulang", async () => {
       setToken("sess-x");
       fetchMock.mockResolvedValue(
-        jsonResponse(500, {
-          status: "error",
-          error: { code: "INTERNAL", message: "boom" },
-        }),
+        jsonResponse(500, { status: "error", error: { code: "INTERNAL", message: "boom" } }),
       );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       const before = fetchMock.mock.calls.length;
       await act(async () => {
         result.current.retry();
       });
-      await waitFor(() =>
-        expect(fetchMock.mock.calls.length).toBeGreaterThan(before),
-      );
+      await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(before));
     });
   });
 
@@ -657,14 +503,9 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
     // redirect otomatisnya melempar user ke halaman login `app` tanpa satu kalimat penjelasan.
     test("orderId ngawur → malformed-id, dan TIDAK dilempar ke halaman login app", async () => {
       fetchMock.mockResolvedValue(
-        jsonResponse(401, {
-          status: "error",
-          error: { code: "UNAUTHORIZED", message: "no" },
-        }),
+        jsonResponse(401, { status: "error", error: { code: "UNAUTHORIZED", message: "no" } }),
       );
-      const { result } = renderHook(() => useCheckout("bukan-uuid"), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout("bukan-uuid"), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.errorKind).toBe("malformed-id");
       expect(result.current.isUnauthorized).toBe(false);
@@ -673,14 +514,9 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
 
     test("orderId ngawur → tidak menggantung di spinner", async () => {
       fetchMock.mockResolvedValue(
-        jsonResponse(401, {
-          status: "error",
-          error: { code: "UNAUTHORIZED", message: "no" },
-        }),
+        jsonResponse(401, { status: "error", error: { code: "UNAUTHORIZED", message: "no" } }),
       );
-      const { result } = renderHook(() => useCheckout("bukan-uuid"), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout("bukan-uuid"), { wrapper: createWrapper() });
       expect(result.current.isLoading).toBe(false);
     });
   });
@@ -695,9 +531,7 @@ describe("useCheckout — sebab kegagalan dibedakan (B5, B14)", () => {
           error: { code: "VALIDATION_ERROR", message: "bad id" },
         }),
       );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.isError).toBe(true));
       expect(result.current.errorKind).toBe("malformed-id");
     });
@@ -721,20 +555,14 @@ describe("useCheckout — tenggat yang berganti sumber (F2)", () => {
             status: "success",
             data: makeOrder(
               init?.method === "POST"
-                ? {
-                    expiresAt: panjang,
-                    paymentStatus: "WAITING_FOR_PAYMENT",
-                    paymentChannel: "VA",
-                  }
+                ? { expiresAt: panjang, paymentStatus: "WAITING_FOR_PAYMENT", paymentChannel: "VA" }
                 : { expiresAt: pendek },
             ),
           }),
         ),
       );
 
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       expect(result.current.deadlineExtended).toBe(false);
 
@@ -748,12 +576,8 @@ describe("useCheckout — tenggat yang berganti sumber (F2)", () => {
   describe("negative", () => {
     test("tenggat yang tidak berubah antar-poll → tidak dianggap diperpanjang", async () => {
       setToken("sess-x");
-      fetchMock.mockResolvedValue(
-        jsonResponse(200, { status: "success", data: makeOrder() }),
-      );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      fetchMock.mockResolvedValue(jsonResponse(200, { status: "success", data: makeOrder() }));
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       expect(result.current.deadlineExtended).toBe(false);
     });
@@ -778,24 +602,16 @@ describe("useCheckout — HELD menunggu putusan ops, jadi tetap di-poll", () => 
             hits += 1;
             return jsonResponse(200, {
               status: "success",
-              data: makeOrder({
-                paymentStatus: "HELD",
-                status: "HELD",
-                expiresAt: LEWAT,
-              }),
+              data: makeOrder({ paymentStatus: "HELD", status: "HELD", expiresAt: LEWAT }),
             });
           },
         }),
       );
 
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       const afterFirst = hits;
-      await waitFor(() => expect(hits).toBeGreaterThan(afterFirst), {
-        timeout: 6000,
-      });
+      await waitFor(() => expect(hits).toBeGreaterThan(afterFirst), { timeout: 6000 });
     }, 10_000);
   });
 
@@ -807,17 +623,11 @@ describe("useCheckout — HELD menunggu putusan ops, jadi tetap di-poll", () => 
           mint: () =>
             jsonResponse(200, {
               status: "success",
-              data: makeOrder({
-                paymentStatus: "HELD",
-                status: "FAILED",
-                expiresAt: LEWAT,
-              }),
+              data: makeOrder({ paymentStatus: "HELD", status: "FAILED", expiresAt: LEWAT }),
             }),
         }),
       );
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       expect(result.current.isTerminal).toBe(true);
     });
@@ -839,9 +649,7 @@ describe("useCheckout — Transfer BNI (D25)", () => {
     });
 
   function getCount() {
-    return fetchMock.mock.calls.filter(
-      ([, init]) => !init?.method || init.method === "GET",
-    ).length;
+    return fetchMock.mock.calls.filter(([, init]) => !init?.method || init.method === "GET").length;
   }
 
   describe("positive", () => {
@@ -862,23 +670,15 @@ describe("useCheckout — Transfer BNI (D25)", () => {
             }),
           );
         }
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       await act(async () => {
         await result.current.pay("BANK_TRANSFER", "BNI");
       });
-      const payCall = fetchMock.mock.calls.find(
-        ([, init]) => init?.method === "POST",
-      );
-      expect(payCall?.[1].body).toBe(
-        JSON.stringify({ channel: "BANK_TRANSFER", bank: "BNI" }),
-      );
+      const payCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(payCall?.[1].body).toBe(JSON.stringify({ channel: "BANK_TRANSFER", bank: "BNI" }));
       await waitFor(() => expect(result.current.order?.uniqueCode).toBe("417"));
     });
   });
@@ -894,21 +694,15 @@ describe("useCheckout — Transfer BNI (D25)", () => {
             }),
           );
         }
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       const before = getCount();
       await act(async () => {
         await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
       });
-      await waitFor(() =>
-        expect(result.current.payError).toContain("Pilih Virtual Account"),
-      );
+      await waitFor(() => expect(result.current.payError).toContain("Pilih Virtual Account"));
       await waitFor(() => expect(getCount()).toBeGreaterThan(before));
     });
 
@@ -922,21 +716,15 @@ describe("useCheckout — Transfer BNI (D25)", () => {
             }),
           );
         }
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       const before = getCount();
       await act(async () => {
         await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
       });
-      await waitFor(() =>
-        expect(result.current.payError).toContain("pilih lagi"),
-      );
+      await waitFor(() => expect(result.current.payError).toContain("pilih lagi"));
       await waitFor(() => expect(getCount()).toBeGreaterThan(before));
     });
   });
@@ -946,29 +734,18 @@ describe("useCheckout — Transfer BNI (D25)", () => {
       fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
         if (init?.method === "POST") {
           return Promise.resolve(
-            jsonResponse(409, {
-              status: "error",
-              error: { code: "INVALID_ORDER_STATE", message: "x" },
-            }),
+            jsonResponse(409, { status: "error", error: { code: "INVALID_ORDER_STATE", message: "x" } }),
           );
         }
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       const before = getCount();
       await act(async () => {
         await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
       });
-      await waitFor(() =>
-        expect(result.current.payError).toContain(
-          "tidak lagi bisa memilih metode",
-        ),
-      );
+      await waitFor(() => expect(result.current.payError).toContain("tidak lagi bisa memilih metode"));
       await waitFor(() => expect(getCount()).toBe(before + 1));
     });
   });
@@ -1001,46 +778,28 @@ describe("useCheckout — /pay yang hasilnya belum diketahui (USDX-749 anti-dobe
         if (init?.method === "POST") {
           billed = true; // /pay pertama ternyata sedang dikerjakan server
           return Promise.resolve(
-            jsonResponse(409, {
-              status: "error",
-              error: { code: "PAYMENT_IN_PROGRESS", message: "x" },
-            }),
+            jsonResponse(409, { status: "error", error: { code: "PAYMENT_IN_PROGRESS", message: "x" } }),
           );
         }
-        return Promise.resolve(
-          jsonResponse(200, {
-            status: "success",
-            data: billed ? WAITING() : REQUESTED(),
-          }),
-        );
+        return Promise.resolve(jsonResponse(200, { status: "success", data: billed ? WAITING() : REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       await act(async () => {
         await result.current.pay("VA", "BCA").catch(() => {});
       });
       expect(result.current.payError).toBe(PAY_CHECKING_MESSAGE);
-      await waitFor(
-        () => expect(result.current.order?.virtualAccountNo).toBe("8808999"),
-        { timeout: 5000 },
-      );
+      await waitFor(() => expect(result.current.order?.virtualAccountNo).toBe("8808999"), { timeout: 5000 });
     });
   });
 
   describe("negative", () => {
     test("koneksi putus (fetch melempar TypeError) → 'masih memastikan', bukan 'gagal'", async () => {
       fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
-        if (init?.method === "POST")
-          return Promise.reject(new TypeError("Failed to fetch"));
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        if (init?.method === "POST") return Promise.reject(new TypeError("Failed to fetch"));
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       await act(async () => {
         await result.current.pay("VA", "BCA").catch(() => {});
@@ -1053,22 +812,15 @@ describe("useCheckout — /pay yang hasilnya belum diketahui (USDX-749 anti-dobe
   describe("edge cases", () => {
     test("pesanan tetap REQUESTED (server memang tidak membuat tagihan) → tetap bisa memilih lagi", async () => {
       fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
-        if (init?.method === "POST")
-          return Promise.reject(new TypeError("Failed to fetch"));
-        return Promise.resolve(
-          jsonResponse(200, { status: "success", data: REQUESTED() }),
-        );
+        if (init?.method === "POST") return Promise.reject(new TypeError("Failed to fetch"));
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
       });
-      const { result } = renderHook(() => useCheckout(ORDER_ID), {
-        wrapper: createWrapper(),
-      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
       await waitFor(() => expect(result.current.order).not.toBeNull());
       await act(async () => {
         await result.current.pay("VA", "BCA").catch(() => {});
       });
-      await waitFor(() =>
-        expect(result.current.order?.paymentStatus).toBe("REQUESTED"),
-      );
+      await waitFor(() => expect(result.current.order?.paymentStatus).toBe("REQUESTED"));
       expect(result.current.isPaying).toBe(false);
     });
   });
