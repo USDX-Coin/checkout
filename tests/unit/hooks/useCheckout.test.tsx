@@ -8,7 +8,7 @@ import type { MintOrderDetail } from "@/types";
 // anti-race teruji end-to-end lewat fetch sungguhan (di-stub).
 vi.mock("@/lib/auth/redirect", () => ({ redirectToApp: vi.fn() }));
 import { redirectToApp } from "@/lib/auth/redirect";
-import { useCheckout } from "@/hooks/useCheckout";
+import { useCheckout, PAY_CHECKING_MESSAGE } from "@/hooks/useCheckout";
 
 const mockRedirect = vi.mocked(redirectToApp);
 
@@ -730,7 +730,7 @@ describe("useCheckout — Transfer BNI (D25)", () => {
   });
 
   describe("edge cases", () => {
-    test("409 INVALID_ORDER_STATE TIDAK memicu muat ulang ekstra (order memang sudah terkunci)", async () => {
+    test("409 INVALID_ORDER_STATE → muat ulang SEKALI, supaya tagihan yang sudah ada yang tampil (USDX-749)", async () => {
       fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
         if (init?.method === "POST") {
           return Promise.resolve(
@@ -746,7 +746,82 @@ describe("useCheckout — Transfer BNI (D25)", () => {
         await result.current.pay("BANK_TRANSFER", "BNI").catch(() => {});
       });
       await waitFor(() => expect(result.current.payError).toContain("tidak lagi bisa memilih metode"));
-      expect(getCount()).toBe(before);
+      await waitFor(() => expect(getCount()).toBe(before + 1));
+    });
+  });
+});
+
+// USDX-749 anti-dobel (insiden prod 16 Okt 2026) — /pay yang hasilnya belum diketahui bukan "gagal":
+// server bisa saja sudah membuat tagihannya. Halaman memeriksa ulang sampai tagihannya tampil.
+describe("useCheckout — /pay yang hasilnya belum diketahui (USDX-749 anti-dobel)", () => {
+  const ORDER_ID = "0198f2c4-8d1e-7f22-a3b4-5c6d7e8f9012";
+  const REQUESTED = () =>
+    makeOrder({
+      paymentStatus: "REQUESTED",
+      paymentChannel: null,
+      paymentBank: null,
+      virtualAccountNo: null,
+      totalPayIdr: null,
+    });
+  const WAITING = () =>
+    makeOrder({
+      paymentStatus: "WAITING_FOR_PAYMENT",
+      paymentChannel: "VA",
+      paymentBank: "BCA",
+      virtualAccountNo: "8808999",
+    });
+
+  describe("positive", () => {
+    test("409 PAYMENT_IN_PROGRESS → 'masih memastikan', lalu tagihan yang dibuat server tampil sendiri", async () => {
+      let billed = false;
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") {
+          billed = true; // /pay pertama ternyata sedang dikerjakan server
+          return Promise.resolve(
+            jsonResponse(409, { status: "error", error: { code: "PAYMENT_IN_PROGRESS", message: "x" } }),
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { status: "success", data: billed ? WAITING() : REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      await act(async () => {
+        await result.current.pay("VA", "BCA").catch(() => {});
+      });
+      expect(result.current.payError).toBe(PAY_CHECKING_MESSAGE);
+      await waitFor(() => expect(result.current.order?.virtualAccountNo).toBe("8808999"), { timeout: 5000 });
+    });
+  });
+
+  describe("negative", () => {
+    test("koneksi putus (fetch melempar TypeError) → 'masih memastikan', bukan 'gagal'", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") return Promise.reject(new TypeError("Failed to fetch"));
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      await act(async () => {
+        await result.current.pay("VA", "BCA").catch(() => {});
+      });
+      expect(result.current.payError).toBe(PAY_CHECKING_MESSAGE);
+      expect(result.current.payError).not.toContain("Gagal");
+    });
+  });
+
+  describe("edge cases", () => {
+    test("pesanan tetap REQUESTED (server memang tidak membuat tagihan) → tetap bisa memilih lagi", async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") return Promise.reject(new TypeError("Failed to fetch"));
+        return Promise.resolve(jsonResponse(200, { status: "success", data: REQUESTED() }));
+      });
+      const { result } = renderHook(() => useCheckout(ORDER_ID), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.order).not.toBeNull());
+      await act(async () => {
+        await result.current.pay("VA", "BCA").catch(() => {});
+      });
+      await waitFor(() => expect(result.current.order?.paymentStatus).toBe("REQUESTED"));
+      expect(result.current.isPaying).toBe(false);
     });
   });
 });
